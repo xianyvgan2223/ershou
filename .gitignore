@@ -1,0 +1,47 @@
+# ---------- 密钥与本地配置（绝对不能提交）----------
+.env
+.env.local
+*.local.yml
+*.local.yaml
+*.pem
+*.key
+*.keystore
+*.jks
+
+# ---------- Java / Maven ----------
+target/
+*.class
+*.jar
+*.war
+*.log
+logs/
+hs_err_pid*
+
+# ---------- 上传文件（本地降级模式）----------
+upload/
+
+# ---------- Node / 前端 ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+coverage/
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# ---------- OS ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- 其他 ----------
+*.tmp
+*.bak

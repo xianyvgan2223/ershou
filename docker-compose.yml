@@ -1,0 +1,86 @@
+# 校园二手交易平台 · 本地开发依赖编排（Redis + MinIO；MySQL 默认不启动）
+#
+# 密钥来自同目录的 .env（已被 .gitignore 忽略）。首次使用：
+#   copy .env.example .env    然后填写真实密码
+#
+# 用法：
+#   docker compose up -d                  # 默认：Redis + MinIO
+#   docker compose --profile full up -d   # 额外起容器版 MySQL（本机已有 MySQL 8.0，一般不需要）
+#   docker compose ps | logs -f minio | down
+#
+# 端口（避开本机其他项目 glaucoma 占用的 6379 / 9000 / 9001）：
+#   Redis  ${REDIS_PORT:-6380} → 容器 6379
+#   MinIO  API ${MINIO_API_PORT:-9010} → 9000；控制台 ${MINIO_CONSOLE_PORT:-9011} → 9001
+#
+# 镜像本地都已有，命中缓存不会重新下载：redis:7-alpine、minio/minio:RELEASE.2025-09-07T16-13-09Z
+# 存储桶由后端启动时自动创建（MinioFileStorageService.init），无需 mc 镜像。
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: ershou-redis
+    restart: "no"          # 手动启动：不随 Docker Desktop 自动拉起（需要时 docker compose up -d）
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?请先在 .env 中设置 REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请先在 .env 中设置 REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: ershou-minio
+    restart: "no"          # 手动启动：同上
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ershou}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请先在 .env 中设置 MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT:-9010}:9000"        # S3 API：后端上传下载 + 前端访问图片
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"    # 控制台：http://localhost:9011
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # 容器版 MySQL：本机 3306 已被已安装的 MySQL 8.0 占用，默认不启动
+  mysql:
+    profiles: ["full"]
+    image: mysql:8.0.36
+    container_name: ershou-mysql
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请先在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ershou}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --lower_case_table_names=1
+    ports:
+      - "${MYSQL_CONTAINER_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  redis-data:
+  minio-data:
+  mysql-data:
