@@ -6,6 +6,7 @@ import {
   Goods,
   List,
   Location,
+  Setting,
   ShoppingCart,
   Star,
 } from '@element-plus/icons-vue'
@@ -22,13 +23,20 @@ const creditScore = computed(() => userStore.creditScore)
 /** 信用分换算成 5 星展示（满分 100） */
 const creditStars = computed(() => Math.max(0, Math.min(5, Math.round(creditScore.value / 20))))
 
-const entries = [
-  { label: '我的发布', desc: '在售 / 已售 / 下架', icon: Goods, path: '/publish-list' },
-  { label: '我的收藏', desc: '心仪好物随时找', icon: Star, path: '/favorites' },
-  { label: '我的面交', desc: '买家 / 卖家面交单', icon: List, path: '/orders' },
-  { label: '购物车', desc: '合并面交更省事', icon: ShoppingCart, path: '/cart' },
-  { label: '校内地图', desc: '挑个安全的面交点', icon: Location, path: '/map' },
-]
+const entries = computed(() => {
+  const base = [
+    { label: '我的发布', desc: '在售 / 已售 / 下架', icon: Goods, path: '/publish-list' },
+    { label: '我的收藏', desc: '心仪好物随时找', icon: Star, path: '/favorites' },
+    { label: '我的面交', desc: '买家 / 卖家面交单', icon: List, path: '/orders' },
+    { label: '购物车', desc: '合并面交更省事', icon: ShoppingCart, path: '/cart' },
+    { label: '校内地图', desc: '挑个安全的面交点', icon: Location, path: '/map' },
+  ]
+  // 运营人员额外展示后台入口
+  if (userStore.isAdmin) {
+    return [{ label: '运营后台', desc: '审核工作台 / 用户管理', icon: Setting, path: '/admin' }, ...base]
+  }
+  return base
+})
 
 async function loadProfile(): Promise<void> {
   loading.value = true

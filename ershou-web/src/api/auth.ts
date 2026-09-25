@@ -46,6 +46,10 @@ export interface UserProfile {
   identityFlag: number
   publishLimit: number
   chatLimit: number
+  /** role_flags 位标记（1 普通 / 2 商家 / 4 代卖员 / 8 运营） */
+  roleFlags?: number
+  /** 是否运营人员 */
+  isAdmin?: boolean
 }
 
 export function sendSmsCode(phone: string): Promise<null> {

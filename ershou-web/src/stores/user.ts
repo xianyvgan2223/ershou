@@ -21,6 +21,8 @@ export const useUserStore = defineStore('user', () => {
   const creditLevel = computed(() => profile.value?.creditLevel || '')
   const campusName = computed(() => profile.value?.campusName || userInfo.value?.campusName || '')
   const identityFlag = computed(() => profile.value?.identityFlag ?? userInfo.value?.identityFlag ?? 0)
+  /** 是否运营人员（后端 /users/me 下发） */
+  const isAdmin = computed(() => profile.value?.isAdmin ?? false)
 
   /** 登录（手机号 + 验证码），成功后写入 token 并拉取资料 */
   async function login(params: LoginParams): Promise<LoginResult> {
@@ -65,6 +67,7 @@ export const useUserStore = defineStore('user', () => {
     creditLevel,
     campusName,
     identityFlag,
+    isAdmin,
     login,
     fetchProfile,
     logout,

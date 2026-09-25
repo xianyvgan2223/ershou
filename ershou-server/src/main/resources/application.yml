@@ -64,6 +64,11 @@ ershou:
     block-keywords: 管制刀具,仿真枪,枪支,毒品,大麻,处方药,电子烟,烟弹,代写,代考,论文代写,发票,银行卡,身份证,迷药,窃听,偷拍,破解软件,假证,仿真枪,气枪,弩,开刃
     # 可疑：转人工审核
     review-keywords: 加微信,加v,转账,定金,先付款,垫付
+  admin:
+    # 运营后台：sys_user.role_flags 命中 8 位即视为运营
+    role-flag: 8
+    # 额外的运营用户 id 白名单（逗号分隔，本地开发/应急用）
+    user-ids: ${ERSHOU_ADMIN_USER_IDS:}
   storage:
     mode: minio
     endpoint: http://127.0.0.1:9010

@@ -400,3 +400,30 @@ img {
 .el-dropdown-menu__item {
   border-radius: 8px;
 }
+
+// ---------- 运营后台：表格统一观感 ----------
+.admin {
+  .el-table {
+    --el-table-border-color: var(--line);
+    --el-table-row-hover-bg-color: var(--brand-50);
+  }
+
+  .el-table th.el-table__cell {
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-weight: 600;
+  }
+
+  .el-table .el-table__cell {
+    padding: 9px 0;
+  }
+
+  .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+    background: #fbfcfe;
+  }
+
+  // 表格自带横向滚动条时留一点呼吸感
+  .el-table__inner-wrapper::before {
+    background-color: var(--line);
+  }
+}

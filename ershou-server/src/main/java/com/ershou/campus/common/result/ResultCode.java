@@ -30,6 +30,11 @@ public enum ResultCode {
     CONTENT_VIOLATION(50001, "内容涉嫌违规，已拦截"),
     RISK_BLOCKED(50002, "该操作触发风控拦截"),
 
+    ADMIN_ITEM_STATUS(60001, "当前商品状态不允许该审核操作"),
+    ADMIN_POINT_STATUS(60002, "当前点位状态不允许该审核操作"),
+    ADMIN_REASON_REQUIRED(60003, "请填写驳回原因"),
+    ADMIN_SELF_OPERATION(60004, "不能对自己执行该操作"),
+
     SYSTEM_ERROR(90001, "系统开小差了，请稍后再试"),
     STORAGE_ERROR(90003, "文件存储服务不可用");
 

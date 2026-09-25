@@ -6,6 +6,7 @@ import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.ResultCode;
 import com.ershou.campus.common.util.PhoneCrypto;
 import com.ershou.campus.common.util.RedisKeys;
+import com.ershou.campus.module.admin.service.AdminAuthService;
 import com.ershou.campus.module.school.entity.Campus;
 import com.ershou.campus.module.school.entity.School;
 import com.ershou.campus.module.school.mapper.CampusMapper;
@@ -25,6 +26,7 @@ import org.springframework.util.StringUtils;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
@@ -40,6 +42,7 @@ public class UserService {
     private final CampusMapper campusMapper;
     private final StringRedisTemplate redis;
     private final PhoneCrypto phoneCrypto;
+    private final AdminAuthService adminAuthService;
 
     @Value("${ershou.sms.mock:true}")
     private boolean smsMock;
@@ -129,12 +132,16 @@ public class UserService {
         return toVO(getById(StpUtil.getLoginIdAsLong()), false);
     }
 
+    /** 批量取用户：返回 HashMap，调用方即使拿 null key 取值也不会 NPE */
     public Map<Long, SysUser> mapByIds(Collection<Long> ids) {
+        Map<Long, SysUser> map = new HashMap<>();
         if (ids == null || ids.isEmpty()) {
-            return Map.of();
+            return map;
         }
-        return userMapper.selectBatchIds(ids).stream()
-                .collect(Collectors.toMap(SysUser::getId, Function.identity(), (a, b) -> a));
+        for (SysUser user : userMapper.selectBatchIds(ids)) {
+            map.putIfAbsent(user.getId(), user);
+        }
+        return map;
     }
 
     public UserVO toVO(SysUser user, boolean isNewUser) {
@@ -151,6 +158,8 @@ public class UserService {
         vo.setPublishLimit(user.getPublishLimit());
         vo.setChatLimit(user.getChatLimit());
         vo.setNewUser(isNewUser);
+        vo.setRoleFlags(user.getRoleFlags());
+        vo.setIsAdmin(adminAuthService.isAdmin(user));
         String phone = null;
         try {
             if (user.getPhone() != null) {

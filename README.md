@@ -7,6 +7,7 @@
 | --- | --- | --- |
 | 需求文档 | `校园二手交易平台需求文档.md` | PRD（含校内地图、AI 审核、毕业季代卖） |
 | 开发文档 | `开发文档.md` | 架构、数据库、Redis、**Elasticsearch 搜索**、接口、部署、排期 |
+| 开发日志 | `开发日志.md` | 每轮迭代的产出 / 决策 / 踩坑 / 实测验证（倒序，最新在最上面） |
 | 环境清单 | `环境检查与安装清单.md` | 本机环境实测结果与安装步骤 |
 | 后端 | `ershou-server/` | Spring Boot 3.3.5 + MyBatis-Plus 3.5.9 + Sa-Token + MinIO + Elasticsearch 8 |
 | 前端 | `ershou-web/` | Vue 3.5 + Vite 6 + TypeScript + Element Plus + Leaflet |
@@ -75,7 +76,7 @@ Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后
 
 ## 三、已实现功能
 
-### 后端（79 个 Java 文件）
+### 后端（110 个 Java 文件 / 51 个接口）
 
 | 模块 | 能力 |
 | --- | --- |
@@ -89,11 +90,14 @@ Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后
 | 面交单 | 创建（Redis + DB 条件更新双重锁库 30 分钟）→ 卖家接受/拒绝 → 核销码（一次性、并发兜底）→ 双向确认 → 商品售出 + 双方信用分 +2 |
 | 文件 | MinIO 上传（校验 → 压缩长边 1280 → 存桶），MinIO 不可用时可切 `local` 降级 |
 | 定时任务 | 释放超时锁库、面交单 2 小时超时失效、商品 60 天过期 |
+| **运营后台** | 审核工作台（商品 / 点位 通过·驳回·批量）、模板化驳回原因、商品全状态检索与**强制下架**、用户封禁/解封/限权、信用分人工调整（写 credit_log 流水）、操作审计（sys_audit_log，含变更前后与 IP）；管理员判定统一走 role_flags & 8 或白名单 |
 | 通用 | 统一响应体 + 错误码分段 + 全局异常 + traceId 链路 + 分页 + Swagger |
 
-### 前端（34 个文件）
+### 前端（16 个页面 / 39 个源文件）
 
 登录、首页（搜索/分类/排序/分页）、**校内地图**（Leaflet CRS.Simple + 气泡聚合 + 选点）、商品详情、发布（多图上传）、购物车（分组 + 合并面交）、我的面交单（买家/卖家双 tab、核销）、我的收藏、我的发布、个人中心。
+
+**运营后台**（/admin，仅运营可见，路由 requiresAdmin 守卫）：运营概览、审核工作台（商品/点位双 tab + 批量处置 + 驳回原因模板）、商品管理（强制下架）、用户管理（封禁/解封/信用分）、操作日志。
 
 ## 四、关键验证结果
 
@@ -105,9 +109,50 @@ Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后
 双向确认完成              → 商品已售出 + 双方信用分 100 → 102
 越权下架他人商品          → 30005
 未登录访问需登录接口      → 10002
+
+-- 运营后台（scripts/admin-smoke-test.ps1，44 项断言全绿）
+普通用户访问运营接口      → 10003 无权限访问
+审核通过 / 驳回           → 商品 status 1→2 / 1→6（reject_code 落库）
+重复审核 / 无原因驳回     → 60001 / 60003
+批量通过                  → 一次处置多件，逐条返回失败原因
+用户提点 → 运营通过        → audit_status 0 到 1，安全分可校正，随即出现在地图
+封禁 / 解封               → status 3（含 ban_until）→ 1（清空）
+运营封禁自己              → 60004 不能对自己执行该操作
+信用分人工调整            → 100 到 105 且写入 credit_log 流水
+强制下架违规商品          → status 2 到 8 违规下架
+每次后台写操作            → 落 sys_audit_log（操作人/动作/前后值/IP）
 ```
 
-## 五、注意事项
+## 五、运营后台（审核工作台）
+
+AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品会永久停在"审核中"；现在统一收敛到运营后台。
+
+**开通运营身份**（两种方式，满足其一即可）：
+
+1. sys_user.role_flags 置上 8 位（role_flags | 8）——推荐；
+2. 环境变量 ERSHOU_ADMIN_USER_IDS=3,5 配置白名单（本地开发/应急）。
+
+    # 把某个用户设为运营（id 可从 sys_user 表或 /users/me 获取）
+    $env:MYSQL_PWD = $env:MYSQL_PASSWORD
+    mysql -h 127.0.0.1 -u ershou ershou -e "update sys_user set role_flags = role_flags | 8 where id = 3;"
+
+前端顶栏下拉与"我的"页会在 isAdmin=true 时出现**运营后台**入口；接口前缀 /api/v1/admin（16 个接口）。
+
+| 能力 | 关键接口 |
+| --- | --- |
+| 概览与待办 | GET /admin/dashboard |
+| 商品审核队列 | GET /admin/audit/items |
+| 审核通过 / 驳回 / 批量 | POST /admin/audit/items/{id}/approve · /{id}/reject · /batch |
+| 驳回原因模板 | GET /admin/audit/reject-reasons?scope=item 或 point |
+| 点位审核 | GET /admin/audit/points · POST /admin/audit/points/{id}/approve 或 reject |
+| 商品管理 / 强制下架 | GET /admin/items · POST /admin/items/{id}/offline |
+| 用户管理 / 信用分 | GET /admin/users · POST /admin/users/{id}/status 或 credit |
+| 面交单查询 | GET /admin/orders |
+| 操作审计 | GET /admin/audit-logs |
+
+**端到端自测**：scripts/admin-smoke-test.ps1（默认打 8080，可加 -Base http://127.0.0.1:8081/api/v1 指向其他实例；44 项断言，可重复执行）。
+
+## 六、注意事项
 
 1. **PowerShell 脚本必须带 BOM**（本机 PS 5.1 默认按 GBK 读 .ps1，中文会乱码报错），详见环境清单 4.6。
 2. Redis / MinIO / Elasticsearch 容器都是 **restart=no 手动启动**，开机后需要跑 `dev-up.ps1`（ES 首次启动约 30~60 秒）。

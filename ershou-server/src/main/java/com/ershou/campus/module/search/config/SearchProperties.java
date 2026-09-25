@@ -3,9 +3,6 @@ package com.ershou.campus.module.search.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * 商品搜索（Elasticsearch）相关配置，对应 application-*.yml 的 ershou.search.*
  */
@@ -36,10 +33,4 @@ public class SearchProperties {
 
     /** ES 请求失败后的熔断时长（毫秒），窗口内直接走降级路径 */
     private long failureBackoffMs = 15000;
-
-    /** 允许触发全量重建的管理员用户 id 白名单 */
-    private List<Long> adminUserIds = new ArrayList<>();
-
-    /** 管理员位：sys_user.role_flags 位与命中即视为管理员 */
-    private int adminRoleFlag = 8;
 }

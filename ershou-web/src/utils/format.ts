@@ -65,6 +65,20 @@ export function formatDateTime(value?: string | null): string {
   return normalized.length > 16 ? normalized.slice(0, 16) : normalized
 }
 
+/** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前，超过 7 天回落具体时间 */
+export function formatRelativeTime(value?: string | null): string {
+  if (!value) return '--'
+  const time = new Date(value.replace(' ', 'T')).getTime()
+  if (Number.isNaN(time)) return formatDateTime(value)
+  const diff = Date.now() - time
+  if (diff < 0) return formatDateTime(value)
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + ' 分钟前'
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + ' 小时前'
+  if (diff < 7 * 86_400_000) return Math.floor(diff / 86_400_000) + ' 天前'
+  return formatDateTime(value)
+}
+
 /** 取昵称首字，用于没有头像时的占位 */
 export function nameInitial(name?: string | null): string {
   if (!name) return '同'

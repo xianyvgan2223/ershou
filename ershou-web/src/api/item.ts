@@ -11,7 +11,8 @@ export interface ItemVO {
   title: string
   price: number
   originalPrice: number | null
-  negotiable: boolean
+  /** 0=一口价，1=可议价（后端 Integer，非布尔） */
+  negotiable: 0 | 1
   conditionLevel: number
   coverUrl: string
   images: string[]
@@ -54,9 +55,11 @@ export interface PublishItemParams {
   conditionLevel: number
   price: number
   originalPrice?: number | null
-  negotiable: boolean
+  /** 0=一口价，1=可议价（后端 Integer，非布尔） */
+  negotiable: 0 | 1
   stock: number
-  isUnique: boolean
+  /** 0=多件库存，1=孤品（后端 Integer，非布尔） */
+  isUnique: 0 | 1
   images: string[]
   preferPointId?: number | null
 }

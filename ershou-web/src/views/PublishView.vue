@@ -96,9 +96,9 @@ async function handleSubmit(): Promise<void> {
       conditionLevel: form.conditionLevel,
       price,
       originalPrice: form.originalPrice,
-      negotiable: form.negotiable,
+      negotiable: form.negotiable ? 1 : 0,
       stock: form.isUnique ? 1 : form.stock,
-      isUnique: form.isUnique,
+      isUnique: form.isUnique ? 1 : 0,
       images: form.images,
       preferPointId: form.preferPointId,
     })

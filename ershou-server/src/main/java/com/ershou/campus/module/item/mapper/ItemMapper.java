@@ -33,4 +33,19 @@ public interface ItemMapper extends BaseMapper<Item> {
 
     @Update("UPDATE item SET fav_count = GREATEST(fav_count + #{delta}, 0) WHERE id = #{itemId}")
     int addFavCount(@Param("itemId") Long itemId, @Param("delta") int delta);
+
+    /** 运营审核通过：仅"审核中"可通过（条件更新兜底并发重复审核） */
+    @Update("UPDATE item SET status = 2, audit_result = 1, audit_reason = #{reason}, reject_code = NULL, version = version + 1 "
+            + "WHERE id = #{itemId} AND status = 1")
+    int approveAudit(@Param("itemId") Long itemId, @Param("reason") String reason);
+
+    /** 运营审核驳回：仅"审核中"可驳回 */
+    @Update("UPDATE item SET status = 6, audit_result = 2, audit_reason = #{reason}, reject_code = #{rejectCode}, version = version + 1 "
+            + "WHERE id = #{itemId} AND status = 1")
+    int rejectAudit(@Param("itemId") Long itemId, @Param("reason") String reason, @Param("rejectCode") String rejectCode);
+
+    /** 运营强制下架（违规）：审核中/在售/已锁定/已驳回 都可强制下架 */
+    @Update("UPDATE item SET status = 8, audit_result = 2, audit_reason = #{reason}, version = version + 1 "
+            + "WHERE id = #{itemId} AND status IN (1, 2, 3, 6)")
+    int forceOffline(@Param("itemId") Long itemId, @Param("reason") String reason);
 }

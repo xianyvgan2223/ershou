@@ -182,11 +182,15 @@ public class TradePointService {
         }
     }
 
+    /** 批量取点位：返回 HashMap，调用方即使拿 null key 取值也不会 NPE */
     public Map<Long, TradePoint> mapByIds(Collection<Long> ids) {
+        Map<Long, TradePoint> map = new HashMap<>();
         if (ids == null || ids.isEmpty()) {
-            return Map.of();
+            return map;
         }
-        return pointMapper.selectBatchIds(ids).stream()
-                .collect(Collectors.toMap(TradePoint::getId, Function.identity(), (a, b) -> a));
+        for (TradePoint point : pointMapper.selectBatchIds(ids)) {
+            map.putIfAbsent(point.getId(), point);
+        }
+        return map;
     }
 }

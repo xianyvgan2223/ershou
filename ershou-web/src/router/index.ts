@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import { getToken } from '@/utils/request'
+import { useUserStore } from '@/stores/user'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -9,6 +11,8 @@ declare module 'vue-router' {
     title?: string
     /** 是否需要登录 */
     requiresAuth?: boolean
+    /** 是否需要运营人员权限 */
+    requiresAdmin?: boolean
   }
 }
 
@@ -77,6 +81,43 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ProfileView.vue'),
         meta: { title: '我的', requiresAuth: true },
       },
+      {
+        path: 'admin',
+        component: () => import('@/views/admin/AdminShell.vue'),
+        meta: { title: '运营后台', requiresAuth: true, requiresAdmin: true },
+        children: [
+          {
+            path: '',
+            name: 'admin-dashboard',
+            component: () => import('@/views/admin/AdminDashboardView.vue'),
+            meta: { title: '运营概览', requiresAuth: true, requiresAdmin: true },
+          },
+          {
+            path: 'audit',
+            name: 'admin-audit',
+            component: () => import('@/views/admin/AdminAuditView.vue'),
+            meta: { title: '审核工作台', requiresAuth: true, requiresAdmin: true },
+          },
+          {
+            path: 'items',
+            name: 'admin-items',
+            component: () => import('@/views/admin/AdminItemsView.vue'),
+            meta: { title: '商品管理', requiresAuth: true, requiresAdmin: true },
+          },
+          {
+            path: 'users',
+            name: 'admin-users',
+            component: () => import('@/views/admin/AdminUsersView.vue'),
+            meta: { title: '用户管理', requiresAuth: true, requiresAdmin: true },
+          },
+          {
+            path: 'logs',
+            name: 'admin-logs',
+            component: () => import('@/views/admin/AdminLogsView.vue'),
+            meta: { title: '操作日志', requiresAuth: true, requiresAdmin: true },
+          },
+        ],
+      },
     ],
   },
   {
@@ -91,12 +132,26 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !getToken()) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (to.path === '/login' && getToken()) {
     return { path: '/' }
+  }
+  if (to.meta.requiresAdmin) {
+    const userStore = useUserStore()
+    try {
+      if (!userStore.profile) {
+        await userStore.fetchProfile()
+      }
+    } catch {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+    if (!userStore.isAdmin) {
+      ElMessage.error('该页面仅运营人员可访问')
+      return { path: '/' }
+    }
   }
   return true
 })

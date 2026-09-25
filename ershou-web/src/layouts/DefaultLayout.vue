@@ -8,6 +8,7 @@ import {
   MapLocation,
   Plus,
   Search,
+  Setting,
   ShoppingCart,
   Star,
   Tickets,
@@ -158,7 +159,10 @@ onMounted(async () => {
                 <el-dropdown-item command="/publish-list">我的发布</el-dropdown-item>
                 <el-dropdown-item command="/favorites" :icon="Star">我的收藏</el-dropdown-item>
                 <el-dropdown-item command="/orders" :icon="Tickets">我的面交</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+                <el-dropdown-item v-if="userStore.isAdmin" command="/admin" :icon="Setting" divided>
+                  运营后台
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" :divided="!userStore.isAdmin">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

@@ -11,7 +11,7 @@ export interface MapConfig {
 export interface MapPoint {
   id: number
   name: string
-  /** 点位类型：1 快递驿站 / 2 食堂 / 3 教学楼 / 4 宿舍区 …（前端仅用于展示） */
+  /** 点位类型：1 门卫室旁 / 2 食堂 / 3 广场 / 4 快递站 / 5 教学楼大厅 / 6 校警室旁 / 7 宿舍区 / 9 其他 */
   type: number
   /** 像素坐标：coordX 对应 Leaflet 的 lng，coordY 对应 lat */
   coordX: number
@@ -64,21 +64,25 @@ export function suggestTradePoint(params: SuggestTradePointParams): Promise<null
   return http.post<null>('/trade-points/suggest', params)
 }
 
-/** 点位类型文案 */
+/** 点位类型文案：与 sql/schema.sql 的 trade_point.point_type 字典一致 */
 export function pointTypeLabel(type?: number | null): string {
   switch (type) {
     case 1:
-      return '快递驿站'
+      return '门卫室旁'
     case 2:
       return '食堂'
     case 3:
-      return '教学楼'
+      return '广场'
     case 4:
-      return '宿舍区'
+      return '快递站'
     case 5:
-      return '图书馆'
+      return '教学楼大厅'
     case 6:
-      return '体育馆'
+      return '校警室旁'
+    case 7:
+      return '宿舍区'
+    case 9:
+      return '其他'
     default:
       return '校内点位'
   }
