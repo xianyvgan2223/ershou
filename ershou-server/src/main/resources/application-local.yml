@@ -1,0 +1,11 @@
+# 本地私有配置（已被 .gitignore 忽略，不会提交）
+# 启动方式： --spring.profiles.active=dev,local   （覆盖 application-dev.yml 中的占位符）
+spring:
+  datasource:
+    password: __REDACTED_DB_PASSWORD__
+  data:
+    redis:
+      password: __REDACTED_DB_PASSWORD__
+ershou:
+  storage:
+    secret-key: __REDACTED_DB_PASSWORD__

@@ -1,0 +1,78 @@
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: ershou-server
+  profiles:
+    # dev = 开发配置占位符；local = 本机真实密码（application-local.yml，已被 .gitignore 忽略）
+    # 这样在 IDEA 里直接运行也不需要额外配置；文件不存在时 Spring 会忽略
+    active: dev,local
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 30MB
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 604800
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+ershou:
+  crypto:
+    # 手机号 AES 密钥（16 位）。生产环境必须换成随机值并用环境变量注入
+    phone-key: ${PHONE_AES_KEY:__REDACTED_PHONE_KEY__}
+  sms:
+    mock: true
+    mock-code: "123456"
+  ai:
+    # 绝对禁售：命中即拦截
+    block-keywords: 管制刀具,仿真枪,枪支,毒品,大麻,处方药,电子烟,烟弹,代写,代考,论文代写,发票,银行卡,身份证,迷药,窃听,偷拍,破解软件,假证,仿真枪,气枪,弩,开刃
+    # 可疑：转人工审核
+    review-keywords: 加微信,加v,转账,定金,先付款,垫付
+  storage:
+    mode: minio
+    endpoint: http://127.0.0.1:9010
+    access-key: ${MINIO_ROOT_USER:ershou}
+    # 不给默认值：密码缺失时应当启动报错，而不是静默用示例密码去连
+    secret-key: ${MINIO_ROOT_PASSWORD}
+    bucket: ershou
+    public-base-url: http://127.0.0.1:9010/ershou
+    max-size-mb: 5
+    image-max-edge: 1280
+    local-path: ./upload/
+    local-url-prefix: http://127.0.0.1:8080/static/

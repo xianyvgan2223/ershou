@@ -1,18 +1,22 @@
-# 校园二手交易平台 · 本地开发依赖编排（Redis + MinIO；MySQL 默认不启动）
+# 校园二手交易平台 · 本地开发依赖编排（Redis + MinIO + Elasticsearch；MySQL 默认不启动）
 #
 # 密钥来自同目录的 .env（已被 .gitignore 忽略）。首次使用：
 #   copy .env.example .env    然后填写真实密码
 #
 # 用法：
-#   docker compose up -d                  # 默认：Redis + MinIO
+#   docker compose up -d                  # 默认：Redis + MinIO + Elasticsearch
 #   docker compose --profile full up -d   # 额外起容器版 MySQL（本机已有 MySQL 8.0，一般不需要）
+#   docker compose up -d --build elasticsearch
+#                                         # 重建搜索镜像（IK 中文分词插件源更新时用）
 #   docker compose ps | logs -f minio | down
 #
 # 端口（避开本机其他项目 glaucoma 占用的 6379 / 9000 / 9001）：
 #   Redis  ${REDIS_PORT:-6380} → 容器 6379
 #   MinIO  API ${MINIO_API_PORT:-9010} → 9000；控制台 ${MINIO_CONSOLE_PORT:-9011} → 9001
+#   ES     ${ES_PORT:-9210} → 9200（单节点、关闭安全认证，仅本机开发；镜像带 IK 中文分词）
 #
-# 镜像本地都已有，命中缓存不会重新下载：redis:7-alpine、minio/minio:RELEASE.2025-09-07T16-13-09Z
+# 镜像：redis:7-alpine、minio/minio:RELEASE.2025-09-07T16-13-09Z、elasticsearch:8.13.4 本机已拉取，
+# 命中缓存不会重新下载；ES 另在其上构建一层中文分词插件（docker/es/Dockerfile，构建约 10 秒）。
 # 存储桶由后端启动时自动创建（MinioFileStorageService.init），无需 mc 镜像。
 
 services:
@@ -54,6 +58,37 @@ services:
       retries: 5
       start_period: 20s
 
+  # Elasticsearch：商品搜索。单节点 + 关闭安全认证，只监听本机端口
+  # 默认构建 docker/es/Dockerfile：装 IK 中文分词（装不上自动退 smartcn，再不行用内置 ngram，
+  # 后端启动时会探测实际可用的分词器并据此建索引，三者都能跑）。
+  # 想用纯官方镜像（不构建、不装插件）：删掉下面 build 段，并把 image 改成 elasticsearch:8.13.4，
+  # 然后删掉旧索引（DELETE /ershou_item）重启后端，让它按 ngram 重建。
+  elasticsearch:
+    image: ${ES_IK_IMAGE:-ershou-elasticsearch-ik:8.13.4}
+    build:
+      context: ./docker/es
+      args:
+        ES_BASE_IMAGE: ${ES_IMAGE:-elasticsearch:8.13.4}
+        IK_URL: ${IK_URL:-https://get.infini.cloud/elasticsearch/analysis-ik/8.13.4}
+    container_name: ershou-es
+    restart: "no"          # 手动启动：同 Redis / MinIO
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+      TZ: Asia/Shanghai
+    ports:
+      - "${ES_PORT:-9210}:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   # 容器版 MySQL：本机 3306 已被已安装的 MySQL 8.0 占用，默认不启动
   mysql:
     profiles: ["full"]
@@ -84,3 +119,4 @@ volumes:
   redis-data:
   minio-data:
   mysql-data:
+  es-data:

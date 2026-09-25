@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ershou}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:ershou}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6380}
+      password: ${REDIS_PASSWORD}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+  elasticsearch:
+    uris: ${ES_URIS:http://127.0.0.1:9210}
+    connection-timeout: 2s
+    socket-timeout: 5s
+
+# 商品搜索：Elasticsearch 优先，异常时自动降级 MySQL LIKE
+ershou:
+  search:
+    enabled: ${ES_SEARCH_ENABLED:true}
+    index-name: ershou_item
+    fallback-to-db: true
+    reindex-on-startup: true
+    sync-cron: "0 */2 * * * ?"
+    sync-lookback-minutes: 30
+    bulk-size: 200
+    failure-backoff-ms: 15000
+
+logging:
+  level:
+    com.ershou.campus: debug
+    org.springframework.web: info

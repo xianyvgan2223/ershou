@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   校园二手交易平台 · 开发环境一键自检脚本
 .DESCRIPTION
