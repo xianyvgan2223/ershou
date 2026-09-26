@@ -11,6 +11,8 @@ import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.ai.AuditDecision;
 import com.ershou.campus.module.ai.AuditResult;
 import com.ershou.campus.module.ai.ContentAuditService;
+import com.ershou.campus.module.cart.entity.Favorite;
+import com.ershou.campus.module.cart.mapper.FavoriteMapper;
 import com.ershou.campus.module.item.dto.ItemPublishDTO;
 import com.ershou.campus.module.item.dto.ItemQueryDTO;
 import com.ershou.campus.module.item.entity.Item;
@@ -49,6 +51,7 @@ public class ItemService {
 
     private final ItemMapper itemMapper;
     private final ItemCategoryMapper categoryMapper;
+    private final FavoriteMapper favoriteMapper;
     private final UserService userService;
     private final TradePointService tradePointService;
     private final ContentAuditService auditService;
@@ -60,8 +63,14 @@ public class ItemService {
 
     private static final int DEFAULT_HOURS_VALID = 60 * 24;
 
-    public PageResult<ItemVO> page(ItemQueryDTO q) {
-        // 关键词检索优先走 Elasticsearch；ES 不可用/异常时按配置降级 MySQL LIKE
+    public PageResult<ItemVO> page(ItemQueryDTO q, Long userId) {
+        PageResult<ItemVO> result = queryPage(q);
+        fillFavorited(result.getRecords(), userId);
+        return result;
+    }
+
+    /** 关键词检索优先走 Elasticsearch；ES 不可用/异常时按配置降级 MySQL LIKE */
+    private PageResult<ItemVO> queryPage(ItemQueryDTO q) {
         if (itemSearchService.supports(q)) {
             try {
                 return searchViaEs(q);
@@ -138,10 +147,12 @@ public class ItemService {
                 .eq(Item::getSellerId, userId)
                 .orderByDesc(Item::getId);
         Page<Item> page = itemMapper.selectPage(new Page<>(pageNum, Math.min(pageSize, 100)), w);
-        return PageResult.of(page, this::toVO);
+        PageResult<ItemVO> result = PageResult.of(page, this::toVO);
+        fillFavorited(result.getRecords(), userId);
+        return result;
     }
 
-    public ItemVO detail(Long id) {
+    public ItemVO detail(Long id, Long userId) {
         Item item = itemMapper.selectById(id);
         if (item == null) {
             throw new BizException(ResultCode.ITEM_NOT_FOUND);
@@ -153,6 +164,7 @@ public class ItemService {
         }
         ItemVO vo = toVO(item);
         vo.setDescription(item.getDescription());
+        fillFavorited(List.of(vo), userId);
         return vo;
     }
 
@@ -247,6 +259,25 @@ public class ItemService {
             throw new BizException(ResultCode.ITEM_NOT_FOUND);
         }
         return item;
+    }
+
+    /** 批量回填「当前登录用户是否已收藏」，未登录或空列表直接跳过，避免多余查询 */
+    public void fillFavorited(List<ItemVO> records, Long userId) {
+        if (userId == null || records == null || records.isEmpty()) {
+            return;
+        }
+        List<Long> itemIds = records.stream()
+                .map(ItemVO::getId).filter(Objects::nonNull).distinct().toList();
+        if (itemIds.isEmpty()) {
+            return;
+        }
+        Set<Long> favoritedIds = favoriteMapper.selectList(Wrappers.<Favorite>lambdaQuery()
+                        .eq(Favorite::getUserId, userId)
+                        .in(Favorite::getItemId, itemIds))
+                .stream().map(Favorite::getItemId).collect(Collectors.toSet());
+        for (ItemVO vo : records) {
+            vo.setFavorited(favoritedIds.contains(vo.getId()));
+        }
     }
 
     public ItemVO toVO(Item item) {

@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Location, Star, StarFilled } from '@element-plus/icons-vue'
 import { addFavorite, removeFavorite } from '@/api/item'
 import type { ItemVO } from '@/api/item'
 import { conditionLabel, formatPrice, nameInitial } from '@/utils/format'
 import { getToken } from '@/utils/request'
+import { showTip } from '@/utils/feedback'
 
 const props = withDefaults(
   defineProps<{
     item: ItemVO
-    /** 列表接口不返回收藏态，由父组件决定初始值（我的收藏列表传 true） */
+    /** 兜底初始值：接口未返回 favorited 时（如旧数据 / 我的收藏列表）由父组件指定 */
     initialFavorited?: boolean
   }>(),
   { initialFavorited: false },
@@ -24,8 +24,17 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 
-const favorited = ref(props.initialFavorited)
+// 接口已返回 favorited（未登录为 false），我的收藏列表仍可传 initialFavorited 兜底
+const favorited = ref<boolean>(props.item.favorited ?? props.initialFavorited)
 const favoriteLoading = ref(false)
+
+// 列表重新加载（筛选 / 翻页 / 返回首页）后，以服务端收藏态为准
+watch(
+  () => props.item.favorited,
+  (value) => {
+    if (typeof value === 'boolean') favorited.value = value
+  },
+)
 
 const cover = computed(() => props.item.coverUrl || props.item.images?.[0] || '')
 const sellerName = computed(() => props.item.seller?.nickname || '同学')
@@ -39,7 +48,7 @@ function goDetail(): void {
 
 async function toggleFavorite(): Promise<void> {
   if (!getToken()) {
-    ElMessage.warning('登录后才能收藏商品')
+    showTip('登录后才能收藏商品', 'warning')
     router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
@@ -48,11 +57,11 @@ async function toggleFavorite(): Promise<void> {
     if (favorited.value) {
       await removeFavorite(props.item.id)
       favorited.value = false
-      ElMessage.success('已取消收藏')
+      showTip('已取消收藏')
     } else {
       await addFavorite(props.item.id)
       favorited.value = true
-      ElMessage.success('已加入收藏')
+      showTip('已加入收藏')
     }
     emit('favorite-change', { itemId: props.item.id, favorited: favorited.value })
   } catch {

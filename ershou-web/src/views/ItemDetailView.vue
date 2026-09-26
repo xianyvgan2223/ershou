@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import {
   ArrowLeft,
   ChatDotRound,
@@ -15,6 +14,7 @@ import type { ItemVO } from '@/api/item'
 import { addToCart } from '@/api/cart'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { conditionLabel, formatDateTime, formatPrice, nameInitial } from '@/utils/format'
+import { showTip } from '@/utils/feedback'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,7 +49,10 @@ async function loadItem(): Promise<void> {
   if (!Number.isFinite(itemId.value)) return
   loading.value = true
   try {
-    item.value = await fetchItemDetail(itemId.value)
+    const detail = await fetchItemDetail(itemId.value)
+    item.value = detail
+    // 刷新 / 直接进详情页时收藏态取自服务端，避免误判为未收藏
+    favorited.value = Boolean(detail.favorited)
   } catch {
     item.value = null
   } finally {
@@ -65,11 +68,13 @@ async function toggleFavorite(): Promise<void> {
     if (favorited.value) {
       await removeFavorite(current.id)
       favorited.value = false
-      ElMessage.success('已取消收藏')
+      current.favCount = Math.max(0, (current.favCount ?? 0) - 1)
+      showTip('已取消收藏')
     } else {
       await addFavorite(current.id)
       favorited.value = true
-      ElMessage.success('已加入收藏')
+      current.favCount = (current.favCount ?? 0) + 1
+      showTip('已加入收藏')
     }
   } catch {
     // 响应拦截器已提示
@@ -84,7 +89,7 @@ async function handleAddCart(goCart: boolean): Promise<void> {
   cartLoading.value = true
   try {
     await addToCart({ itemId: current.id, quantity: 1 })
-    ElMessage.success(goCart ? '已加入购物车，去选面交时间吧' : '已加入购物车')
+    showTip(goCart ? '已加入购物车，去选面交时间吧' : '已加入购物车')
     if (goCart) router.push('/cart')
   } catch {
     // 响应拦截器已提示
@@ -95,7 +100,7 @@ async function handleAddCart(goCart: boolean): Promise<void> {
 
 function handleChat(): void {
   if (!ensureLogin('登录后才能私聊卖家')) return
-  ElMessage.info('私聊功能正在开发中，可先通过面交单留言联系卖家')
+  showTip('私聊功能正在开发中，可先通过面交单留言联系卖家', 'info')
 }
 
 onMounted(loadItem)

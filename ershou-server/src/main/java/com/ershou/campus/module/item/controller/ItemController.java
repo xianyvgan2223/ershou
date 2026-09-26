@@ -23,10 +23,10 @@ public class ItemController {
 
     private final ItemService itemService;
 
-    @Operation(summary = "商品列表（公开）")
+    @Operation(summary = "商品列表（公开；登录后附带本人收藏态）")
     @GetMapping
     public Result<PageResult<ItemVO>> page(ItemQueryDTO query) {
-        return Result.ok(itemService.page(query));
+        return Result.ok(itemService.page(query, currentUserId()));
     }
 
     @Operation(summary = "我的发布（需登录）")
@@ -37,10 +37,10 @@ public class ItemController {
         return Result.ok(itemService.mine(pageNum, pageSize, StpUtil.getLoginIdAsLong()));
     }
 
-    @Operation(summary = "商品详情（公开）")
+    @Operation(summary = "商品详情（公开；登录后附带本人收藏态）")
     @GetMapping("/{id}")
     public Result<ItemVO> detail(@PathVariable Long id) {
-        return Result.ok(itemService.detail(id));
+        return Result.ok(itemService.detail(id, currentUserId()));
     }
 
     @Operation(summary = "发布商品（含 AI 机审）")
@@ -56,5 +56,14 @@ public class ItemController {
         StpUtil.checkLogin();
         itemService.offline(id, StpUtil.getLoginIdAsLong());
         return Result.ok();
+    }
+
+    /** 公开读接口里「登录了就用登录态，没登录就是匿名」：拿不到就返回 null，由服务端按未收藏处理 */
+    private Long currentUserId() {
+        try {
+            return StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

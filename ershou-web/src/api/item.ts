@@ -28,6 +28,8 @@ export interface ItemVO {
   status: number
   viewCount: number
   favCount: number
+  /** 当前登录用户是否已收藏（未登录恒为 false；列表和详情接口都会返回） */
+  favorited?: boolean
   publishedAt: string
   seller: SellerBrief
   /** 仅详情接口返回 */

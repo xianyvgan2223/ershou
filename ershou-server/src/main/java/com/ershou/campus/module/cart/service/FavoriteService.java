@@ -59,7 +59,10 @@ public class FavoriteService {
         Map<Long, Item> items = itemMapper.selectBatchIds(itemIds).stream()
                 .collect(Collectors.toMap(Item::getId, i -> i, (a, b) -> a));
         List<ItemVO> vos = itemIds.stream().map(items::get).filter(java.util.Objects::nonNull)
-                .map(itemService::toVO).toList();
+                .map(itemService::toVO)
+                // 这里是「我的收藏」列表，命中即已收藏
+                .peek(vo -> vo.setFavorited(true))
+                .toList();
         return PageResult.of(vos, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
