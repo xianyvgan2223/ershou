@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   校园二手交易平台 · 一键启动本地依赖（Redis + MinIO + Elasticsearch）
 .DESCRIPTION

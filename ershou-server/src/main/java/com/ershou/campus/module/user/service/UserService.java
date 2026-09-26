@@ -4,13 +4,10 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.ResultCode;
+import com.ershou.campus.common.cache.DictionaryCache;
 import com.ershou.campus.common.util.PhoneCrypto;
 import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.module.admin.service.AdminAuthService;
-import com.ershou.campus.module.school.entity.Campus;
-import com.ershou.campus.module.school.entity.School;
-import com.ershou.campus.module.school.mapper.CampusMapper;
-import com.ershou.campus.module.school.mapper.SchoolMapper;
 import com.ershou.campus.module.user.dto.LoginDTO;
 import com.ershou.campus.module.user.entity.SysUser;
 import com.ershou.campus.module.user.mapper.SysUserMapper;
@@ -38,8 +35,7 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final SysUserMapper userMapper;
-    private final SchoolMapper schoolMapper;
-    private final CampusMapper campusMapper;
+    private final DictionaryCache dict;
     private final StringRedisTemplate redis;
     private final PhoneCrypto phoneCrypto;
     private final AdminAuthService adminAuthService;
@@ -169,12 +165,13 @@ public class UserService {
         } catch (Exception ignored) {
         }
         vo.setPhone(phone);
+        // 学校 / 校区是静态字典：走 Redis 缓存，避免每次 /users/me 都查两张表
         if (user.getSchoolId() != null) {
-            School s = schoolMapper.selectById(user.getSchoolId());
+            var s = dict.school(user.getSchoolId());
             vo.setSchoolName(s == null ? null : s.getName());
         }
         if (user.getCampusId() != null) {
-            Campus c = campusMapper.selectById(user.getCampusId());
+            var c = dict.campus(user.getCampusId());
             vo.setCampusName(c == null ? null : c.getName());
         }
         return vo;

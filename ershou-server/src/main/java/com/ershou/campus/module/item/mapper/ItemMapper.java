@@ -28,8 +28,12 @@ public interface ItemMapper extends BaseMapper<Item> {
             + "WHERE id = #{itemId} AND status IN (2, 3)")
     int markSold(@Param("itemId") Long itemId);
 
-    @Update("UPDATE item SET view_count = view_count + 1 WHERE id = #{itemId}")
-    int incrView(@Param("itemId") Long itemId);
+    /**
+     * 浏览量批量回写（ScheduledTasks.flushViewCounts 每 10 分钟一次）。
+     * updated_at 会随之刷新，ES 增量同步因此能顺带把最新 viewCount 带过去。
+     */
+    @Update("UPDATE item SET view_count = view_count + #{delta} WHERE id = #{itemId} AND #{delta} > 0")
+    int incrViewBy(@Param("itemId") Long itemId, @Param("delta") int delta);
 
     @Update("UPDATE item SET fav_count = GREATEST(fav_count + #{delta}, 0) WHERE id = #{itemId}")
     int addFavCount(@Param("itemId") Long itemId, @Param("delta") int delta);

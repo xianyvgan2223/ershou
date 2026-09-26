@@ -3,6 +3,10 @@ package com.ershou.campus.module.item.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ershou.campus.common.cache.CacheEvictor;
+import com.ershou.campus.common.cache.CacheProperties;
+import com.ershou.campus.common.cache.DictionaryCache;
+import com.ershou.campus.common.cache.JsonCache;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.ResultCode;
@@ -16,13 +20,10 @@ import com.ershou.campus.module.cart.mapper.FavoriteMapper;
 import com.ershou.campus.module.item.dto.ItemPublishDTO;
 import com.ershou.campus.module.item.dto.ItemQueryDTO;
 import com.ershou.campus.module.item.entity.Item;
-import com.ershou.campus.module.item.entity.ItemCategory;
-import com.ershou.campus.module.item.mapper.ItemCategoryMapper;
 import com.ershou.campus.module.item.mapper.ItemMapper;
 import com.ershou.campus.module.item.vo.ItemVO;
 import com.ershou.campus.module.item.vo.SellerVO;
 import com.ershou.campus.module.map.entity.TradePoint;
-import com.ershou.campus.module.map.service.TradePointService;
 import com.ershou.campus.module.search.config.SearchProperties;
 import com.ershou.campus.module.search.dto.ItemSearchHits;
 import com.ershou.campus.module.search.service.ItemIndexService;
@@ -49,17 +50,22 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ItemService {
 
+    private static final TypeReference<ItemVO> ITEM_VO = new TypeReference<>() {
+    };
+
     private final ItemMapper itemMapper;
-    private final ItemCategoryMapper categoryMapper;
     private final FavoriteMapper favoriteMapper;
     private final UserService userService;
-    private final TradePointService tradePointService;
     private final ContentAuditService auditService;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final ItemSearchService itemSearchService;
     private final ItemIndexService itemIndexService;
     private final SearchProperties searchProperties;
+    private final JsonCache cache;
+    private final CacheEvictor evictor;
+    private final DictionaryCache dict;
+    private final CacheProperties cacheProps;
 
     private static final int DEFAULT_HOURS_VALID = 60 * 24;
 
@@ -100,19 +106,22 @@ public class ItemService {
         }
         Map<Long, Item> items = itemMapper.selectBatchIds(hits.ids()).stream()
                 .collect(Collectors.toMap(Item::getId, Function.identity()));
-        List<ItemVO> records = new ArrayList<>(hits.ids().size());
+        // 先按 ES 顺序挑出仍可展示的，再批量组装：分类/点位走字典缓存 MGET，卖家只查 1 次
+        List<Item> ordered = new ArrayList<>(hits.ids().size());
         for (Long id : hits.ids()) {
             Item item = items.get(id);
             if (item == null || item.getStatus() == null || item.getStatus() != 2) {
                 continue;
             }
-            ItemVO vo = toVO(item);
-            ItemSearchHits.Highlight highlight = hits.highlights().get(id);
+            ordered.add(item);
+        }
+        List<ItemVO> records = toVOList(ordered);
+        for (ItemVO vo : records) {
+            ItemSearchHits.Highlight highlight = hits.highlights().get(vo.getId());
             if (highlight != null) {
                 vo.setHighlightTitle(highlight.title());
                 vo.setHighlightDescription(highlight.description());
             }
-            records.add(vo);
         }
         return PageResult.of(records, hits.total(), q.getPageNum(), pageSize);
     }
@@ -139,7 +148,7 @@ public class ItemService {
             default -> w.orderByDesc(Item::getPublishedAt).orderByDesc(Item::getId);
         }
         Page<Item> page = itemMapper.selectPage(new Page<>(q.getPageNum(), Math.min(q.getPageSize(), 100)), w);
-        return PageResult.of(page, this::toVO);
+        return PageResult.of(toVOList(page.getRecords()), page.getTotal(), page.getCurrent(), page.getSize());
     }
 
     public PageResult<ItemVO> mine(long pageNum, long pageSize, Long userId) {
@@ -147,25 +156,62 @@ public class ItemService {
                 .eq(Item::getSellerId, userId)
                 .orderByDesc(Item::getId);
         Page<Item> page = itemMapper.selectPage(new Page<>(pageNum, Math.min(pageSize, 100)), w);
-        PageResult<ItemVO> result = PageResult.of(page, this::toVO);
+        PageResult<ItemVO> result = PageResult.of(toVOList(page.getRecords()),
+                page.getTotal(), page.getCurrent(), page.getSize());
         fillFavorited(result.getRecords(), userId);
         return result;
     }
 
+    /**
+     * 商品详情：先读 Redis 缓存（含空值缓存防穿透），未命中才回源 DB 并回填。
+     * 浏览量不再同步 UPDATE（热点行锁 + 每次都刷 updated_at 会连累 ES 增量同步），
+     * 改为 Redis 计数、定时批量回写（见 ScheduledTasks.flushViewCounts）。
+     */
     public ItemVO detail(Long id, Long userId) {
-        Item item = itemMapper.selectById(id);
-        if (item == null) {
+        JsonCache.Hit<ItemVO> hit = cache.get(RedisKeys.itemDetail(id), ITEM_VO);
+        // 空值缓存命中 → 直接按"不存在"处理，不查库（防穿透）
+        if ((hit.hit() && hit.value() == null) || (!hit.hit() && cache.isNullCached(RedisKeys.itemNull(id)))) {
             throw new BizException(ResultCode.ITEM_NOT_FOUND);
         }
-        try {
-            itemMapper.incrView(id);
-        } catch (Exception e) {
-            log.warn("浏览量自增失败: {}", e.getMessage());
+        ItemVO vo;
+        if (hit.hit()) {
+            vo = hit.value();
+        } else {
+            Item item = itemMapper.selectById(id);
+            if (item == null) {
+                cache.setNull(RedisKeys.itemNull(id), cacheProps.getNullValueTtl());
+                throw new BizException(ResultCode.ITEM_NOT_FOUND);
+            }
+            vo = toVO(item);
+            vo.setDescription(item.getDescription());
+            // 先落缓存再叠加浏览量：缓存里存的是"库里的值"，用户维度的 favorited 不入缓存
+            cache.set(RedisKeys.itemDetail(id), vo, cacheProps.getItemDetailTtl());
         }
-        ItemVO vo = toVO(item);
-        vo.setDescription(item.getDescription());
+        int pending = pendingViews(id);
+        if (pending > 0) {
+            vo.setViewCount((vo.getViewCount() == null ? 0 : vo.getViewCount()) + pending);
+        }
         fillFavorited(List.of(vo), userId);
         return vo;
+    }
+
+    /** 浏览量增量先记在 Redis（开发文档 6.2：ershou:item:view:{itemId}），返回当前未回写的增量 */
+    private int pendingViews(Long itemId) {
+        try {
+            String key = RedisKeys.itemView(itemId);
+            Long count = redis.opsForValue().increment(key);
+            if (count == null) {
+                return 0;
+            }
+            if (count == 1L) {
+                redis.expire(key, Duration.ofHours(2));
+                redis.opsForSet().add(RedisKeys.itemViewDirty(), String.valueOf(itemId));
+            }
+            return count > 0 ? count.intValue() : 0;
+        } catch (Exception e) {
+            log.warn("[item][view][{}] 浏览量计数失败，本次不计数：{}", itemId, e.getMessage());
+            return 0;
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -224,6 +270,7 @@ public class ItemService {
         item.setVersion(0);
         itemMapper.insert(item);
         TxHooks.afterCommit(() -> itemIndexService.syncById(item.getId()));
+        TxHooks.afterCommit(() -> evictor.itemChanged(item.getId()));
 
         log.info("[item][publish][{}][{}] status={}", item.getId(), userId, status);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -250,6 +297,7 @@ public class ItemService {
         update.setStatus(5);
         itemMapper.updateById(update);
         TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
         log.info("[item][offline][{}][{}]", itemId, userId);
     }
 
@@ -280,7 +328,88 @@ public class ItemService {
         }
     }
 
+    /** 单条组装：分类 / 点位走字典缓存（命中即 0 次 DB 查询） */
     public ItemVO toVO(Item item) {
+        Map<Long, String> categoryNames = item.getCategoryId() == null ? Map.of()
+                : Collections.singletonMap(item.getCategoryId(), dict.categoryName(item.getCategoryId()));
+        Map<Long, TradePoint> points = item.getPreferPointId() == null ? Map.of()
+                : Collections.singletonMap(item.getPreferPointId(), dict.point(item.getPreferPointId()));
+        Map<Long, SysUser> sellers = userService.mapByIds(
+                item.getSellerId() == null ? List.of() : List.of(item.getSellerId()));
+        return assemble(item, categoryNames, points, sellers);
+    }
+
+    /**
+     * 批量组装（列表 / 搜索 / 收藏页）：分类与点位一次 MGET，卖家一次 selectBatchIds。
+     * 之前每条商品各查一次分类 + 点位 + 卖家，20 条列表 = 60 次多余查询。
+     */
+    public List<ItemVO> toVOList(List<Item> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> categoryNames = dict.categoryNames(
+                items.stream().map(Item::getCategoryId).filter(Objects::nonNull).toList());
+        Map<Long, TradePoint> points = dict.points(
+                items.stream().map(Item::getPreferPointId).filter(Objects::nonNull).toList());
+        Map<Long, SysUser> sellers = userService.mapByIds(
+                items.stream().map(Item::getSellerId).filter(Objects::nonNull).collect(Collectors.toSet()));
+        List<ItemVO> records = items.stream().map(item -> assemble(item, categoryNames, points, sellers)).toList();
+        applyPendingViews(records);
+        return records;
+    }
+
+    /**
+     * 叠加 Redis 里尚未回写 DB 的浏览量增量（每 10 分钟才批量回写一次），
+     * 保证首页 / 搜索 / 收藏列表和详情页看到的是同一个数字——否则列表最多滞后 10 分钟。
+     * 一次 MGET，20 条列表的成本可以忽略；Redis 异常时退化为"展示已回写值"。
+     */
+    private void applyPendingViews(List<ItemVO> records) {
+        List<Long> ids = records.stream().map(ItemVO::getId).filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<String> raw;
+        try {
+            raw = redis.opsForValue().multiGet(ids.stream().map(RedisKeys::itemView).toList());
+        } catch (Exception e) {
+            log.warn("[item][view] 读取未回写浏览量失败，改展示已回写值：{}", e.getMessage());
+            return;
+        }
+        if (raw == null) {
+            return;
+        }
+        Map<Long, Integer> pending = new HashMap<>(ids.size());
+        for (int i = 0; i < ids.size() && i < raw.size(); i++) {
+            Integer delta = parsePositiveInt(raw.get(i));
+            if (delta != null) {
+                pending.put(ids.get(i), delta);
+            }
+        }
+        if (pending.isEmpty()) {
+            return;
+        }
+        for (ItemVO vo : records) {
+            Integer delta = pending.get(vo.getId());
+            if (delta != null) {
+                vo.setViewCount((vo.getViewCount() == null ? 0 : vo.getViewCount()) + delta);
+            }
+        }
+    }
+
+    private static Integer parsePositiveInt(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private ItemVO assemble(Item item, Map<Long, String> categoryNames,
+                            Map<Long, TradePoint> points, Map<Long, SysUser> sellers) {
         ItemVO vo = new ItemVO();
         vo.setId(item.getId());
         vo.setTitle(item.getTitle());
@@ -302,17 +431,15 @@ public class ItemService {
         vo.setFavCount(item.getFavCount());
         vo.setPublishedAt(item.getPublishedAt());
         if (item.getCategoryId() != null) {
-            ItemCategory c = categoryMapper.selectById(item.getCategoryId());
-            vo.setCategoryName(c == null ? null : c.getName());
+            vo.setCategoryName(categoryNames.get(item.getCategoryId()));
         }
         if (item.getPreferPointId() != null) {
-            TradePoint p = tradePointService.getById(item.getPreferPointId());
+            TradePoint p = points.get(item.getPreferPointId());
             if (p != null) {
                 vo.setPreferPointName(p.getName());
                 vo.setPreferPointGuide(p.getGuideText());
             }
         }
-        Map<Long, SysUser> sellers = userService.mapByIds(List.of(item.getSellerId()));
         SysUser seller = sellers.get(item.getSellerId());
         if (seller != null) {
             SellerVO sv = new SellerVO();

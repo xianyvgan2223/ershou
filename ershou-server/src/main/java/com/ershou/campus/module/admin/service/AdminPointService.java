@@ -3,6 +3,7 @@ package com.ershou.campus.module.admin.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ershou.campus.common.cache.CacheEvictor;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.ResultCode;
@@ -10,6 +11,7 @@ import com.ershou.campus.module.admin.dto.PointApproveDTO;
 import com.ershou.campus.module.admin.dto.PointRejectDTO;
 import com.ershou.campus.module.admin.vo.AdminPointVO;
 import com.ershou.campus.module.map.entity.TradePoint;
+import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.map.mapper.TradePointMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +39,7 @@ public class AdminPointService {
     private final TradePointMapper pointMapper;
     private final AuditLogService auditLogService;
     private final AdminViewAssembler assembler;
+    private final CacheEvictor evictor;
 
     public PageResult<AdminPointVO> page(Integer auditStatus, Long campusId, String keyword,
                                          long pageNum, long pageSize) {
@@ -84,6 +87,8 @@ public class AdminPointService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_POINT_STATUS, "仅“待审核”的点位可以通过");
         }
+        // 点位通过后会出现在地图上：字典缓存与地图缓存都要失效
+        TxHooks.afterCommit(() -> evictor.pointChanged(pointId));
         auditLogService.record(operatorId, "point", "approve", "trade_point", pointId,
                 state("auditStatus", before.getAuditStatus(), "safetyScore", before.getSafetyScore()),
                 state("auditStatus", AUDIT_APPROVED, "safetyScore", update.getSafetyScore(),
@@ -106,6 +111,7 @@ public class AdminPointService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_POINT_STATUS, "仅“待审核”的点位可以驳回");
         }
+        TxHooks.afterCommit(() -> evictor.pointChanged(pointId));
         auditLogService.record(operatorId, "point", "reject", "trade_point", pointId,
                 state("auditStatus", before.getAuditStatus(), "name", before.getName()),
                 state("auditStatus", AUDIT_REJECTED, "reasonCode", dto.getReasonCode(), "reason", reason));

@@ -5,6 +5,14 @@ export function formatPrice(value?: number | null): string {
   return Number.isInteger(num) ? String(num) : num.toFixed(2)
 }
 
+/** 计数展示（浏览量 / 收藏数）：满 1 万折算成「x.x万」，避免卡片被长数字撑开 */
+export function formatCount(value?: number | null): string {
+  const num = Number(value ?? 0)
+  if (!Number.isFinite(num) || num <= 0) return '0'
+  if (num < 10_000) return String(Math.floor(num))
+  return (num / 10_000).toFixed(1).replace(/\.0$/, '') + '万'
+}
+
 /** 成色文案：1 全新 … 5 较重使用痕迹，其余按「N 成新」兜底 */
 const CONDITION_TEXT: Record<number, string> = {
   1: '全新',

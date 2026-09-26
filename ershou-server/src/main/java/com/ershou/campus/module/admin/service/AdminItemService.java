@@ -3,6 +3,7 @@ package com.ershou.campus.module.admin.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ershou.campus.common.cache.CacheEvictor;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.ResultCode;
@@ -46,6 +47,7 @@ public class AdminItemService {
     private final ItemIndexService itemIndexService;
     private final AuditLogService auditLogService;
     private final AdminViewAssembler assembler;
+    private final CacheEvictor evictor;
 
     /** status 为空 = 全部状态（商品管理）；传 1 = 审核队列（按提交先后，先到先审） */
     public PageResult<AdminItemVO> page(Integer status, String keyword, Long sellerId,
@@ -81,7 +83,7 @@ public class AdminItemService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_ITEM_STATUS, "仅“审核中”的商品可以通过");
         }
-        syncIndex(itemId);
+        afterItemWrite(itemId);
         auditLogService.record(operatorId, "item", "approve", "item", itemId,
                 state("status", before.getStatus(), "auditReason", before.getAuditReason()),
                 state("status", STATUS_ON_SALE, "auditResult", 1, "auditReason", APPROVE_REASON));
@@ -99,7 +101,7 @@ public class AdminItemService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_ITEM_STATUS, "仅“审核中”的商品可以驳回");
         }
-        syncIndex(itemId);
+        afterItemWrite(itemId);
         auditLogService.record(operatorId, "item", "reject", "item", itemId,
                 state("status", before.getStatus(), "auditReason", before.getAuditReason()),
                 state("status", STATUS_REJECTED, "auditResult", 2,
@@ -136,7 +138,7 @@ public class AdminItemService {
                     : itemMapper.rejectAudit(id, reason, dto.getReasonCode());
             if (rows == 1) {
                 success++;
-                syncIndex(id);
+                afterItemWrite(id);
             } else {
                 failures.add(new BatchAuditResultVO.Failure(id, "已被其他运营处理"));
             }
@@ -159,14 +161,16 @@ public class AdminItemService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_ITEM_STATUS, "已售出/已超期/已强制下架的商品无需再下架");
         }
-        syncIndex(itemId);
+        afterItemWrite(itemId);
         auditLogService.record(operatorId, "item", "force-offline", "item", itemId,
                 state("status", before.getStatus()), state("status", STATUS_VIOLATION, "reason", reason));
         log.info("[admin][item][{}][force-offline][operator={}]", itemId, operatorId);
     }
 
-    private void syncIndex(Long itemId) {
+    /** 审核 / 下架后的统一收尾：同步搜索索引 + 失效商品缓存与地图在售数 */
+    private void afterItemWrite(Long itemId) {
         TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
     }
 
     private static Map<String, Object> state(Object... kv) {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Location, Star, StarFilled } from '@element-plus/icons-vue'
+import { Location, Star, StarFilled, View } from '@element-plus/icons-vue'
 import { addFavorite, removeFavorite } from '@/api/item'
 import type { ItemVO } from '@/api/item'
-import { conditionLabel, formatPrice, nameInitial } from '@/utils/format'
+import { conditionLabel, formatCount, formatPrice, nameInitial } from '@/utils/format'
 import { getToken } from '@/utils/request'
 import { showTip } from '@/utils/feedback'
 
@@ -13,8 +13,10 @@ const props = withDefaults(
     item: ItemVO
     /** 兜底初始值：接口未返回 favorited 时（如旧数据 / 我的收藏列表）由父组件指定 */
     initialFavorited?: boolean
+    /** 是否在封面右下角显示浏览量（默认关；首页信息流用它做热度参考） */
+    showViews?: boolean
   }>(),
-  { initialFavorited: false },
+  { initialFavorited: false, showViews: false },
 )
 
 const emit = defineEmits<{
@@ -99,6 +101,11 @@ async function toggleFavorite(): Promise<void> {
       </div>
 
       <span v-if="!onSale" class="card__mask">{{ statusText }}</span>
+
+      <!-- 浏览量：已售/下架的商品也照常显示，z-index 保证不被遮罩盖住 -->
+      <span v-if="showViews" class="card__views" :title="'浏览 ' + (item.viewCount ?? 0) + ' 次'">
+        <el-icon><View /></el-icon>{{ formatCount(item.viewCount) }}
+      </span>
     </div>
 
     <div class="card__body">
@@ -205,6 +212,24 @@ async function toggleFavorite(): Promise<void> {
     font-size: 14px;
     font-weight: 600;
     letter-spacing: 1px;
+  }
+
+  &__views {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgb(15 23 42 / 55%);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 11.5px;
+    line-height: 16px;
+    pointer-events: none;
   }
 
   &__body {

@@ -2,6 +2,7 @@ package com.ershou.campus.module.cart.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ershou.campus.common.cache.CacheEvictor;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.module.cart.entity.Favorite;
 import com.ershou.campus.module.cart.mapper.FavoriteMapper;
@@ -26,6 +27,7 @@ public class FavoriteService {
     private final FavoriteMapper favoriteMapper;
     private final ItemMapper itemMapper;
     private final ItemService itemService;
+    private final CacheEvictor evictor;
 
     public void add(Long userId, Long itemId) {
         try {
@@ -34,6 +36,8 @@ public class FavoriteService {
             f.setItemId(itemId);
             favoriteMapper.insert(f);
             itemMapper.addFavCount(itemId, 1);
+            // fav_count 在商品 VO 里：收藏数变了要删详情缓存（不影响地图的在售数）
+            evictor.item(itemId);
             log.info("[favorite][add][{}][{}]", userId, itemId);
         } catch (DuplicateKeyException e) {
             // 唯一索引兜底：重复收藏直接忽略
@@ -46,6 +50,7 @@ public class FavoriteService {
                 .eq(Favorite::getUserId, userId).eq(Favorite::getItemId, itemId));
         if (deleted > 0) {
             itemMapper.addFavCount(itemId, -1);
+            evictor.item(itemId);
         }
     }
 
@@ -58,11 +63,10 @@ public class FavoriteService {
         }
         Map<Long, Item> items = itemMapper.selectBatchIds(itemIds).stream()
                 .collect(Collectors.toMap(Item::getId, i -> i, (a, b) -> a));
-        List<ItemVO> vos = itemIds.stream().map(items::get).filter(java.util.Objects::nonNull)
-                .map(itemService::toVO)
-                // 这里是「我的收藏」列表，命中即已收藏
-                .peek(vo -> vo.setFavorited(true))
-                .toList();
+        List<Item> ordered = itemIds.stream().map(items::get).filter(java.util.Objects::nonNull).toList();
+        // 批量组装（分类 / 点位走字典缓存），这里是「我的收藏」列表，命中即已收藏
+        List<ItemVO> vos = itemService.toVOList(ordered);
+        vos.forEach(vo -> vo.setFavorited(true));
         return PageResult.of(vos, page.getTotal(), page.getCurrent(), page.getSize());
     }
 

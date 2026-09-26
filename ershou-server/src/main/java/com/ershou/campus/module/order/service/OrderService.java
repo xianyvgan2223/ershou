@@ -2,6 +2,7 @@ package com.ershou.campus.module.order.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ershou.campus.common.cache.CacheEvictor;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.ResultCode;
@@ -50,6 +51,7 @@ public class OrderService {
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final ItemIndexService itemIndexService;
+    private final CacheEvictor evictor;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int LOCK_MINUTES = 30;
@@ -114,8 +116,9 @@ public class OrderService {
             log.warn("[order][lock-fail][{}][{}] 商品已被锁定或不可售", buyerId, itemId);
             throw new BizException(ResultCode.ITEM_LOCKED);
         }
-        // 2 在售 → 3 已锁定：同步搜索索引，避免锁库商品继续被搜到
+        // 2 在售 → 3 已锁定：同步搜索索引 + 失效详情/地图缓存，避免锁库商品继续被搜到、被算进点位在售数
         TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
 
         String code = String.format("%06d", ThreadLocalRandom.current().nextInt(1000000));
         MeetupOrder order = new MeetupOrder();
@@ -198,6 +201,7 @@ public class OrderService {
         orderMapper.updateById(update);
         itemMapper.releaseLock(order.getItemId());
         TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
+        TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
         log.info("[order][reject][{}] orderNo={} reason={}", userId, order.getOrderNo(), reason);
     }
 
@@ -215,6 +219,7 @@ public class OrderService {
         orderMapper.updateById(update);
         itemMapper.releaseLock(order.getItemId());
         TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
+        TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
         log.info("[order][cancel][{}] orderNo={}", userId, order.getOrderNo());
     }
 
@@ -274,6 +279,7 @@ public class OrderService {
         if (finished && order.getStatus() != 3) {
             itemMapper.markSold(order.getItemId());
             TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
+            TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
             userMapper.addCredit(order.getBuyerId(), 2);
             userMapper.addCredit(order.getSellerId(), 2);
             log.info("[order][finished][{}] orderNo={} 面交完成，双方信用分 +2", userId, order.getOrderNo());

@@ -1,9 +1,13 @@
 package com.ershou.campus.module.map.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.ershou.campus.common.cache.CacheEvictor;
+import com.ershou.campus.common.cache.CacheProperties;
+import com.ershou.campus.common.cache.DictionaryCache;
+import com.ershou.campus.common.cache.JsonCache;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.ResultCode;
+import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
 import com.ershou.campus.module.map.dto.PointSuggestDTO;
@@ -11,8 +15,6 @@ import com.ershou.campus.module.map.entity.TradePoint;
 import com.ershou.campus.module.map.mapper.TradePointMapper;
 import com.ershou.campus.module.map.vo.MapDataVO;
 import com.ershou.campus.module.map.vo.TradePointVO;
-import com.ershou.campus.module.school.entity.Campus;
-import com.ershou.campus.module.school.mapper.CampusMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +25,6 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalTime;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -31,13 +32,19 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TradePointService {
 
+    private static final TypeReference<List<TradePointVO>> POINT_LIST = new TypeReference<>() {
+    };
+
     private final TradePointMapper pointMapper;
-    private final CampusMapper campusMapper;
     private final ItemMapper itemMapper;
     private final ObjectMapper json;
+    private final JsonCache cache;
+    private final CacheEvictor evictor;
+    private final DictionaryCache dict;
+    private final CacheProperties cacheProps;
 
     public TradePoint getById(Long id) {
-        return id == null ? null : pointMapper.selectById(id);
+        return dict.point(id);
     }
 
     public List<TradePoint> listByCampus(Long campusId) {
@@ -50,7 +57,7 @@ public class TradePointService {
 
     /** 地图页数据：底图配置 + 点位 + 每个点位的在售商品数/最低价 */
     public MapDataVO mapData(Long campusId) {
-        Campus campus = campusMapper.selectById(campusId);
+        var campus = dict.campus(campusId);
         if (campus == null) {
             throw new BizException(ResultCode.PARAM_ERROR, "校区不存在");
         }
@@ -63,12 +70,22 @@ public class TradePointService {
                 vo.setMapConfig(null);
             }
         }
-        vo.setPoints(withItemCount(listByCampus(campusId), campusId));
+        vo.setPoints(cachedPoints(campusId));
         return vo;
     }
 
     public List<TradePointVO> list(Long campusId) {
-        return withItemCount(listByCampus(campusId), campusId);
+        return cachedPoints(campusId);
+    }
+
+    /**
+     * 点位 + 在售数 / 最低价：整校区的在售商品聚合，原本每次请求都要把全校区在售商品捞进内存。
+     * 缓存 key 带版本号（{@link CacheEvictor#mapVersion()}），商品写路径自增版本号即整体失效。
+     */
+    private List<TradePointVO> cachedPoints(Long campusId) {
+        String key = RedisKeys.mapPoints(campusId, evictor.mapVersion());
+        return cache.getOrLoad(key, cacheProps.getMapPointsTtl(), POINT_LIST,
+                () -> withItemCount(listByCampus(campusId), campusId));
     }
 
     /**
@@ -76,7 +93,7 @@ public class TradePointService {
      * 说明：MVP 用像素坐标做距离近似（自绘底图），22:00 后只推安全分 >= 85 的点位。
      */
     public List<TradePointVO> recommend(Long campusId, Long itemId, Long buyerId) {
-        List<TradePointVO> all = withItemCount(listByCampus(campusId), campusId);
+        List<TradePointVO> all = cachedPoints(campusId);
         if (all.isEmpty()) {
             return List.of();
         }
@@ -92,7 +109,7 @@ public class TradePointService {
         if (itemId != null) {
             Item item = itemMapper.selectById(itemId);
             if (item != null && item.getPreferPointId() != null) {
-                TradePoint p = pointMapper.selectById(item.getPreferPointId());
+                TradePoint p = dict.point(item.getPreferPointId());
                 if (p != null) {
                     refX = p.getCoordX();
                     refY = p.getCoordY();

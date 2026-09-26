@@ -43,7 +43,11 @@ function Show($step, $r) {
 # 前置：后端已在 8080 运行（.\scripts\dev-server.ps1）
 Write-Host '=== 0. 清理上一轮测试数据 ===' -ForegroundColor Cyan
 & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -e "use ershou; delete from meetup_order; delete from cart_item; delete from favorite; delete from item; delete from credit_log; alter table item auto_increment=1; alter table meetup_order auto_increment=1; alter table cart_item auto_increment=1;" 2>&1 | Out-Null
+# 读缓存必须一起清：本脚本是直接删库，Redis 里商品详情 / 地图点位缓存会盖住刚清掉的数据
+$cacheLua = "for i=1,#ARGV do local ks=redis.call('keys',ARGV[i]); for _,k in ipairs(ks) do redis.call('del',k) end end return 'ok'"
+docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning eval $cacheLua 0 'ershou:item:detail:*' 'ershou:item:null:*' 'ershou:item:view:*' 'ershou:map:points:*' 'ershou:dict:*' 'ershou:admin:dashboard' 2>&1 | Out-Null
 Write-Host '  已清空 item/meetup_order/cart_item/favorite（保留用户与点位）' -ForegroundColor DarkGray
+Write-Host '  已清空 Redis 读缓存（商品详情 / 浏览量计数 / 地图点位 / 字典 / 后台统计）' -ForegroundColor DarkGray
 
 Write-Host '=== 1. 登录卖家(13800000002) 与 买家(13800000001) ===' -ForegroundColor Cyan
 Post "$base/auth/sms-code" @{phone='13800000002'} | Out-Null

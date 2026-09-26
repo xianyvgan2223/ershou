@@ -209,7 +209,14 @@ watch(
       </div>
 
       <div v-else-if="items.length" v-loading="loading" class="grid">
-        <ItemCard v-for="(item, index) in items" :key="item.id" :item="item" class="fade-up" :style="{ animationDelay: index * 24 + 'ms' }" />
+        <ItemCard
+          v-for="(item, index) in items"
+          :key="item.id"
+          :item="item"
+          show-views
+          class="fade-up"
+          :style="{ animationDelay: index * 24 + 'ms' }"
+        />
       </div>
 
       <div v-else class="empty-state">
