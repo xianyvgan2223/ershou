@@ -132,7 +132,7 @@ onMounted(() => {
     <div class="panel">
       <div class="panel-title">商品管理</div>
       <div class="admin-items__toolbar">
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 160px" @change="search">
+        <el-select v-model="statusFilter" filterable placeholder="全部状态" clearable style="width: 160px" @change="search">
           <el-option v-for="opt in STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-input

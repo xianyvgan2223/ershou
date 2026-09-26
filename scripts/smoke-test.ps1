@@ -38,7 +38,7 @@ function Show($step, $r) {
   } else { Write-Host ("  " + $step + " => " + ($r | ConvertTo-Json -Compress)) -ForegroundColor DarkGray }
 }
 
-# 端到端冒烟测试：登录 → 发布（含 AI 机审）→ 购物车 → 合并面交 → 核销 → 双向确认
+# 端到端冒烟测试：登录 → 发布（含 AI 机审）→ 购物车 → 合并面交 → 卖家接受（锁库）→ 卖家点已卖出成交
 # 用法： powershell -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 # 前置：后端已在 8080 运行（.\scripts\dev-server.ps1）
 Write-Host '=== 0. 清理上一轮测试数据 ===' -ForegroundColor Cyan
@@ -100,23 +100,44 @@ Show 'checkout' $co
 $orderIds = @($co.data.orders | ForEach-Object { $_.orderId })
 Write-Host ("  生成 " + $orderIds.Count + " 张面交单，行程号 " + $co.data.batchNo) -ForegroundColor DarkGray
 
-Write-Host '=== 6. 卖家：接受面交 → 读取核销码 ===' -ForegroundColor Cyan
+# 商品详情页「约面交」走单品接口 POST /meetup-orders。契约（2026-09 重做后）：
+#   提交 = 一张"意向"，不锁库；面交点与时间窗都可留空（留空=待协商）；
+#   卖家 accept 时才锁库；成交由卖家 confirm 一次完成（核销码已删除）。
+Write-Host '=== 5b. 单品直接约面交（意向，不锁库）+ 时间窗校验 ===' -ForegroundColor Cyan
+$pastStart = (Get-Date).AddHours(-1).ToString('yyyy-MM-dd HH:mm:ss')
+$pastEnd = (Get-Date).AddMinutes(30).ToString('yyyy-MM-dd HH:mm:ss')
+$longEnd = (Get-Date).AddHours(6).ToString('yyyy-MM-dd HH:mm:ss')
+$farStart = (Get-Date).AddDays(9).ToString('yyyy-MM-dd HH:mm:ss')
+$farEnd = (Get-Date).AddDays(9).AddHours(1).ToString('yyyy-MM-dd HH:mm:ss')
+$single = Post "$base/meetup-orders" @{itemId=$ids[2];quantity=1;remark='详情页直接约面交，时间地点都待协商'} $BH
+Show '单品约面交（地点/时间全留空）' $single
+$singleOrderId = $single.data.orders[0].orderId
+$itemStatus = & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -N -B -e "use ershou; select status from item where id=$($ids[2]);" 2>$null
+Write-Host ("  提交后商品状态=" + $itemStatus + "（2=在售，还是没锁）") -ForegroundColor DarkGray
+Show '时间窗超过 3 小时' (Post "$base/meetup-orders" @{itemId=$ids[2];pointId=1;timeSlotStart=$start;timeSlotEnd=$longEnd} $BH)
+Show '开始时间早于当前' (Post "$base/meetup-orders" @{itemId=$ids[2];pointId=1;timeSlotStart=$pastStart;timeSlotEnd=$pastEnd} $BH)
+Show '预约超过 7 天' (Post "$base/meetup-orders" @{itemId=$ids[2];pointId=1;timeSlotStart=$farStart;timeSlotEnd=$farEnd} $BH)
+Show '只填开始不填结束' (Post "$base/meetup-orders" @{itemId=$ids[2];timeSlotStart=$start} $BH)
+Show '不存在的面交点' (Post "$base/meetup-orders" @{itemId=$ids[2];pointId=99999} $BH)
+Show '取消单品意向单' (Post "$base/meetup-orders/$singleOrderId/cancel" @{reason='冒烟测试清理'} $BH)
+
+Write-Host '=== 6. 卖家：接受合并面交单（这时才锁商品）===' -ForegroundColor Cyan
 foreach ($oid in $orderIds) { Show ("accept 单" + $oid) (Post "$base/meetup-orders/$oid/accept" @{} $SH) }
 $sellerOrders = Invoke-RestMethod -Uri "$base/meetup-orders?role=seller" -Headers $SH
-$codes = @{}
-foreach ($rec in $sellerOrders.data.records) { $codes[$rec.id] = $rec.verifyCode }
-foreach ($k in $codes.Keys) { Write-Host ("  单" + $k + " 核销码=" + $codes[$k] + "  状态=" + ($sellerOrders.data.records | Where-Object {$_.id -eq $k}).statusText) -ForegroundColor DarkGray }
+foreach ($rec in $sellerOrders.data.records) {
+  # 面交点与时间窗都可能为空（意向单允许"待协商"）；PS 5.1 不支持内联 if 表达式，先取值
+  $pointText = if ($rec.pointName) { $rec.pointName } else { '待协商' }
+  $slotText = if ($rec.timeSlotStart) { $rec.timeSlotStart } else { '待协商' }
+  Write-Host ("  单" + $rec.id + " 状态=" + $rec.statusText + "  点位=" + $pointText + "  时间=" + $slotText) -ForegroundColor DarkGray
+}
 
-Write-Host '=== 7. 买家：核销 + 确认；卖家：确认 ===' -ForegroundColor Cyan
+Write-Host '=== 7. 买家「我收到了」留痕 → 卖家「已卖出」成交 ===' -ForegroundColor Cyan
 $first = $orderIds[0]
-Show 'verify 错误码' (Post "$base/meetup-orders/$first/verify" @{code='000000'} $BH)
-Show 'verify 正确码' (Post "$base/meetup-orders/$first/verify" @{code=$codes[$first]} $BH)
-Show 'verify 重复使用' (Post "$base/meetup-orders/$first/verify" @{code=$codes[$first]} $BH)
-Show '买家 confirm' (Post "$base/meetup-orders/$first/confirm" @{} $BH)
+Show '买家 confirm（只留痕，不成交）' (Post "$base/meetup-orders/$first/confirm" @{} $BH)
 Show '卖家 confirm（应完成）' (Post "$base/meetup-orders/$first/confirm" @{} $SH)
 
 Write-Host '=== 8. 完成后的数据核对 ===' -ForegroundColor Cyan
-$final = & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -N -B -e "use ershou; select concat('item', id, ' status=', status, ' stock=', stock) from item order by id; select concat('order', id, ' status=', status, ' verified=', ifnull(verified_at,'no'), ' buyer_confirm=', ifnull(buyer_confirm_at,'no'), ' seller_confirm=', ifnull(seller_confirm_at,'no')) from meetup_order order by id; select concat('user', id, ' credit=', credit_score) from sys_user order by id; select concat('cart rows=', count(*)) from cart_item;" 2>&1
+$final = & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -N -B -e "use ershou; select concat('item', id, ' status=', status, ' stock=', stock) from item order by id; select concat('order', id, ' status=', status, ' point=', ifnull(point_id,'待协商'), ' slot=', ifnull(time_slot_start,'待协商'), ' buyer_confirm=', ifnull(buyer_confirm_at,'no'), ' seller_confirm=', ifnull(seller_confirm_at,'no')) from meetup_order order by id; select concat('user', id, ' credit=', credit_score) from sys_user order by id; select concat('cart rows=', count(*)) from cart_item;" 2>&1
 $final
 Write-Host '=== 9. 健康检查 ===' -ForegroundColor Cyan
 (Invoke-RestMethod -Uri 'http://127.0.0.1:8080/actuator/health') | ConvertTo-Json -Compress

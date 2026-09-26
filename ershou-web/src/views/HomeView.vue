@@ -155,6 +155,29 @@ watch(
             </div>
           </div>
         </div>
+
+        <!-- 右侧：新用户最缺的是"这平台怎么用"，顺手填掉大屏右侧的空白 -->
+        <aside class="hero__panel">
+          <p class="hero__panel-title">三步在校内成交</p>
+          <ol class="steps">
+            <li>
+              <em>1</em>
+              <div><b>挑好物</b><span>按分类逛，或用校内地图看身边的闲置</span></div>
+            </li>
+            <li>
+              <em>2</em>
+              <div><b>私聊问细节</b><span>成色、价格、面交点，聊清楚再出门</span></div>
+            </li>
+            <li>
+              <em>3</em>
+              <div><b>到点面交</b><span>当面验货，扫码核销，双方信用分 +2</span></div>
+            </li>
+          </ol>
+          <div class="hero__panel-actions">
+            <el-button round @click="$router.push('/map')">逛校内地图</el-button>
+            <el-button type="primary" round @click="$router.push('/publish')">发布闲置</el-button>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -323,10 +346,99 @@ watch(
     margin-top: 20px;
   }
 
-  &__art {
-    position: relative;
-    flex: 0 0 300px;
-    height: 230px;
+  // 右侧「三步成交」面板：大屏用来平衡首屏、给新用户交代玩法，窄屏隐藏
+  &__panel {
+    flex: 0 0 336px;
+    padding: 18px 18px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: linear-gradient(180deg, var(--brand-50), #fff 62%);
+  }
+
+  &__panel-title {
+    margin: 0 0 12px;
+    color: var(--text-1);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+
+  &__panel-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  em {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--brand-500);
+    color: #fff;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 700;
+  }
+
+  b {
+    display: block;
+    color: var(--text-1);
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  span {
+    color: var(--text-3);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 1080px) {
+  .hero__panel {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero__inner {
+    padding: 22px 16px 20px;
+  }
+
+  .hero__title {
+    font-size: 24px;
+  }
+
+  // 搜索框与按钮在窄屏上下排布，避免按钮被挤出屏幕
+  .hero__search {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .hero__search-btn {
+    flex: 1 0 100%;
+  }
+
+  .hero__stats {
+    gap: 22px;
   }
 }
 

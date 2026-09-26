@@ -348,7 +348,7 @@ onMounted(() => {
     <!-- ---------------- 商品 ---------------- -->
     <div v-show="activeTab === 'item'" class="panel">
       <div class="audit__toolbar">
-        <el-select v-model="itemStatus" style="width: 140px" @change="searchItems">
+        <el-select v-model="itemStatus" filterable style="width: 140px" @change="searchItems">
           <el-option v-for="opt in ITEM_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-input
@@ -469,7 +469,7 @@ onMounted(() => {
     <!-- ---------------- 点位 ---------------- -->
     <div v-show="activeTab === 'point'" class="panel">
       <div class="audit__toolbar">
-        <el-select v-model="pointStatus" style="width: 140px" @change="searchPoints">
+        <el-select v-model="pointStatus" filterable style="width: 140px" @change="searchPoints">
           <el-option label="待审核" :value="0" />
           <el-option label="已通过" :value="1" />
           <el-option label="已驳回" :value="2" />

@@ -211,10 +211,10 @@ CREATE TABLE IF NOT EXISTS meetup_order (
   item_cover       VARCHAR(255) DEFAULT NULL COMMENT '快照',
   quantity         INT          NOT NULL DEFAULT 1,
   deal_price       DECIMAL(10,2) DEFAULT NULL COMMENT '实际成交价(可选填写)',
-  point_id         BIGINT       NOT NULL,
-  point_snapshot   JSON         NOT NULL COMMENT '点位快照(名称/坐标/指引,防篡改)',
-  time_slot_start  DATETIME     NOT NULL COMMENT '时间窗开始',
-  time_slot_end    DATETIME     NOT NULL COMMENT '时间窗结束',
+  point_id         BIGINT       DEFAULT NULL COMMENT '面交点(可空=待协商)',
+  point_snapshot   JSON         DEFAULT NULL COMMENT '点位快照(名称/坐标/指引,防篡改)',
+  time_slot_start  DATETIME     DEFAULT NULL COMMENT '时间窗开始(可空=待协商)',
+  time_slot_end    DATETIME     DEFAULT NULL COMMENT '时间窗结束(可空=待协商)',
   status           TINYINT      NOT NULL DEFAULT 1 COMMENT '1=待卖家确认 2=待面交 3=已完成 4=已取消 5=已失效 6=爽约 7=纠纷中',
   verify_code      CHAR(6)      DEFAULT NULL COMMENT '6位核销码',
   verify_expire_at DATETIME     DEFAULT NULL,
@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS chat_message (
   content     TEXT        NOT NULL COMMENT '内容(AES加密,图片存URL数组)',
   risk_level  TINYINT     NOT NULL DEFAULT 0,
   blocked     TINYINT     NOT NULL DEFAULT 0 COMMENT '是否被风控拦截',
+  recalled    TINYINT     NOT NULL DEFAULT 0 COMMENT '是否已撤回（发送方限定时间内可撤回）',
   created_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_msg_session (session_id, id),
@@ -411,6 +412,19 @@ CREATE TABLE IF NOT EXISTS notification (
   PRIMARY KEY (id),
   KEY idx_notify_user (user_id, is_read, created_at)
 ) ENGINE=InnoDB COMMENT='消息通知';
+
+-- -------------------------------------------------------------
+-- 21. 拉黑（PRD FR-UP-04 / FR-IM-07：拉黑后双向不可私聊）
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_block (
+  id              BIGINT   NOT NULL AUTO_INCREMENT,
+  user_id         BIGINT   NOT NULL COMMENT '发起拉黑的人',
+  blocked_user_id BIGINT   NOT NULL COMMENT '被拉黑的人',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_block_pair (user_id, blocked_user_id),
+  KEY idx_block_target (blocked_user_id)
+) ENGINE=InnoDB COMMENT='用户拉黑';
 
 CREATE TABLE IF NOT EXISTS sys_audit_log (
   id           BIGINT       NOT NULL AUTO_INCREMENT,

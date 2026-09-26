@@ -58,6 +58,19 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '我的发布', requiresAuth: true },
       },
       {
+        // 用户主页：未登录也能看（后端接口公开，不含联系方式）
+        path: 'user/:id',
+        name: 'user-profile',
+        component: () => import('@/views/UserProfileView.vue'),
+        meta: { title: '用户主页' },
+      },
+      {
+        path: 'chat',
+        name: 'chat',
+        component: () => import('@/views/ChatView.vue'),
+        meta: { title: '消息', requiresAuth: true },
+      },
+      {
         path: 'cart',
         name: 'cart',
         component: () => import('@/views/CartView.vue'),

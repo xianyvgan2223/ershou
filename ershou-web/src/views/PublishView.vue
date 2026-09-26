@@ -2,18 +2,19 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { fetchCategories } from '@/api/auth'
 import { publishItem } from '@/api/item'
-import { fetchTradePoints, pointTypeLabel } from '@/api/map'
-import type { TradePoint } from '@/api/map'
+import { pointTypeLabel } from '@/api/map'
+import { tradePointLabel, useTradePoints } from '@/composables/useTradePoints'
 import type { Category } from '@/api/types'
-import { CONDITION_OPTIONS, DEFAULT_CAMPUS_ID } from '@/utils/constants'
+import { CONDITION_OPTIONS } from '@/utils/constants'
 
 const router = useRouter()
 
+const { points: tradePoints, loading: pointsLoading, load: loadTradePoints } = useTradePoints()
 const categories = ref<Category[]>([])
-const tradePoints = ref<TradePoint[]>([])
 const submitting = ref(false)
 
 const form = reactive({
@@ -40,11 +41,7 @@ async function loadBaseData(): Promise<void> {
   } catch {
     categories.value = []
   }
-  try {
-    tradePoints.value = await fetchTradePoints(DEFAULT_CAMPUS_ID)
-  } catch {
-    tradePoints.value = []
-  }
+  await loadTradePoints()
 }
 
 function resetForm(): void {
@@ -145,10 +142,20 @@ onMounted(loadBaseData)
             </el-form-item>
 
             <el-form-item label="商品分类" required>
-              <el-select v-model="form.categoryId" placeholder="请选择分类" style="width: 220px">
+              <el-select
+                v-model="form.categoryId"
+                filterable
+                placeholder="输入关键字搜索分类"
+                style="width: 220px"
+              >
                 <el-option v-for="item in categories" :key="item.id" :label="item.name" :value="item.id" />
               </el-select>
-              <el-select v-model="form.conditionLevel" placeholder="成色" style="width: 180px; margin-left: 12px">
+              <el-select
+                v-model="form.conditionLevel"
+                filterable
+                placeholder="成色"
+                style="width: 180px; margin-left: 12px"
+              >
                 <el-option v-for="item in CONDITION_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
@@ -181,13 +188,32 @@ onMounted(loadBaseData)
             </el-form-item>
 
             <el-form-item label="常用面交点">
-              <el-select v-model="form.preferPointId" placeholder="选择你方便的校内面交点" clearable style="width: 300px">
+              <el-select
+                v-model="form.preferPointId"
+                filterable
+                clearable
+                :loading="pointsLoading"
+                placeholder="输入地点名搜索，例如「食堂」「快递」"
+                style="width: 300px"
+              >
                 <el-option
                   v-for="point in tradePoints"
                   :key="point.id"
-                  :label="`${point.name}（${pointTypeLabel(point.type)}）`"
+                  :label="tradePointLabel(point)"
                   :value="point.id"
-                />
+                >
+                  <span class="publish__point-option">{{ point.name }}</span>
+                  <span class="publish__point-option-type">{{ pointTypeLabel(point.type) }}</span>
+                </el-option>
+                <template #empty>
+                  <p class="publish__point-empty">当前校区还没有可选点位</p>
+                </template>
+                <template #footer>
+                  <div class="publish__point-more" @click="router.push('/map')">
+                    <el-icon><Plus /></el-icon>
+                    找不到合适的地点？去地图上推荐一个新点位
+                  </div>
+                </template>
               </el-select>
               <el-button text type="primary" @click="router.push('/map')">去地图上看点位</el-button>
             </el-form-item>
@@ -275,6 +301,38 @@ onMounted(loadBaseData)
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+  }
+
+  &__point-option {
+    margin-right: 6px;
+  }
+
+  &__point-option-type {
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  &__point-empty {
+    margin: 0;
+    padding: 10px 0;
+    color: var(--text-3);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  &__point-more {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+    color: var(--brand-600);
+    font-size: 12.5px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--brand-50);
+    }
   }
 }
 </style>

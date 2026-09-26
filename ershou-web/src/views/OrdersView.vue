@@ -2,19 +2,24 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Location, Refresh, Tickets } from '@element-plus/icons-vue'
+import { Location, Refresh } from '@element-plus/icons-vue'
 import {
   acceptMeetupOrder,
   cancelMeetupOrder,
   confirmMeetupOrder,
   fetchMeetupOrders,
   rejectMeetupOrder,
-  verifyMeetupOrder,
 } from '@/api/order'
 import type { OrderRole, OrderVO } from '@/api/order'
+import { useMeetupStore } from '@/stores/meetup'
 import { formatDateTime, formatPrice, orderStatusTagType } from '@/utils/format'
 
+/** 面交单状态：1 待卖家确认 / 2 待面交 / 3 已完成 / 4 已取消 / 5 已失效 */
+const STATUS_PENDING = 1
+const STATUS_WAITING = 2
+
 const router = useRouter()
+const meetupStore = useMeetupStore()
 
 const role = ref<OrderRole>('buyer')
 const orders = ref<OrderVO[]>([])
@@ -24,41 +29,18 @@ const pageNum = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
-const verifyVisible = ref(false)
-const verifyCodeInput = ref('')
-const currentOrder = ref<OrderVO | null>(null)
-const codeVisible = ref(false)
-const codeOrder = ref<OrderVO | null>(null)
-
-/** 后端 statusText 已中文化，这里按其关键字决定可执行动作 */
-const CLOSED_KEYS = ['取消', '拒绝', '关闭', '失效', '过期']
-
-function isClosed(order: OrderVO): boolean {
-  return CLOSED_KEYS.some((key) => (order.statusText || '').includes(key))
+/**
+ * 状态判断一律用 status 码。
+ * 原先按 statusText 关键字（"待卖家"/"核销"…）匹配，文案一改动作按钮就集体失效 ——
+ * 去掉核销码后更是完全对不上，索性改成状态码。
+ */
+function isPending(order: OrderVO): boolean {
+  return order.status === STATUS_PENDING
 }
 
-function isDone(order: OrderVO): boolean {
-  return (order.statusText || '').includes('完成')
-}
-
-/** 待卖家确认：卖家可接受/拒绝，买家可取消 */
-function isPendingSeller(order: OrderVO): boolean {
-  return !isClosed(order) && !isDone(order) && (order.statusText || '').includes('待卖家')
-}
-
-/** 已核销待确认：双方可确认完成 */
-function isVerified(order: OrderVO): boolean {
-  return !isClosed(order) && !isDone(order) && (order.statusText || '').includes('核销')
-}
-
-/** 待面交 / 待到店：可以出示或输入核销码 */
+/** 卖家已接受：商品已锁定，等见面 */
 function isWaiting(order: OrderVO): boolean {
-  return !isClosed(order) && !isDone(order) && !isPendingSeller(order)
-}
-
-/** 核销之后（或状态里出现「确认」）才允许点确认完成 */
-function canConfirm(order: OrderVO): boolean {
-  return isVerified(order) || (isWaiting(order) && (order.statusText || '').includes('确认'))
+  return order.status === STATUS_WAITING
 }
 
 const currentRoleText = computed(() => (role.value === 'buyer' ? '我买到的' : '我卖出的'))
@@ -93,6 +75,8 @@ async function runAction(order: OrderVO, action: () => Promise<void>, successTex
     await action()
     ElMessage.success(successText)
     await loadOrders()
+    // 处理完立刻更新顶栏红点，不用等 30 秒轮询
+    await meetupStore.loadTodo()
   } catch {
     // 响应拦截器已提示
   } finally {
@@ -101,7 +85,7 @@ async function runAction(order: OrderVO, action: () => Promise<void>, successTex
 }
 
 function handleAccept(order: OrderVO): void {
-  runAction(order, async () => { await acceptMeetupOrder(order.id) }, '已接受面交单')
+  runAction(order, async () => { await acceptMeetupOrder(order.id) }, '已接受，商品已为你锁定')
 }
 
 async function handleReject(order: OrderVO): Promise<void> {
@@ -117,7 +101,7 @@ async function handleReject(order: OrderVO): Promise<void> {
   } catch {
     return
   }
-  await runAction(order, async () => { await rejectMeetupOrder(order.id, reason.trim()) }, '已拒绝面交单')
+  await runAction(order, async () => { await rejectMeetupOrder(order.id, reason.trim()) }, '已拒绝这次约面交')
 }
 
 async function handleCancel(order: OrderVO): Promise<void> {
@@ -133,52 +117,17 @@ async function handleCancel(order: OrderVO): Promise<void> {
   } catch {
     return
   }
-  await runAction(order, async () => { await cancelMeetupOrder(order.id, reason.trim()) }, '已取消面交单')
+  await runAction(order, async () => { await cancelMeetupOrder(order.id, reason.trim()) }, '已取消这次约面交')
 }
 
-function openVerifyDialog(order: OrderVO): void {
-  currentOrder.value = order
-  verifyCodeInput.value = ''
-  verifyVisible.value = true
+/** 卖家：已卖出 = 成交（商品置已售出 + 双方信用分 +2） */
+function handleSold(order: OrderVO): void {
+  runAction(order, async () => { await confirmMeetupOrder(order.id) }, '交易已完成，双方信用分 +2')
 }
 
-function openCodeDialog(order: OrderVO): void {
-  codeOrder.value = order
-  codeVisible.value = true
-}
-
-async function submitVerify(): Promise<void> {
-  const order = currentOrder.value
-  const code = verifyCodeInput.value.trim()
-  if (!order) return
-  if (code.length < 4) {
-    ElMessage.warning('请输入完整的核销码')
-    return
-  }
-  actionId.value = order.id
-  try {
-    const result = await verifyMeetupOrder(order.id, code)
-    ElMessage.success(result.needConfirm ? '核销成功，请确认完成交易' : '核销成功')
-    verifyVisible.value = false
-    await loadOrders()
-  } catch {
-    // 响应拦截器已提示
-  } finally {
-    actionId.value = null
-  }
-}
-
-function handleConfirm(order: OrderVO): void {
-  runAction(order, async () => { await confirmMeetupOrder(order.id) }, '交易已完成，感谢使用校园二手')
-}
-
-async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning(`复制失败，请手动记录：${text}`)
-  }
+/** 买家：我收到了 —— 只留痕，成交仍由卖家确认（买家能单方面下架卖家商品是不合理的） */
+function handleReceived(order: OrderVO): void {
+  runAction(order, async () => { await confirmMeetupOrder(order.id) }, '已记下「我收到了」，等卖家点「已卖出」')
 }
 
 watch(role, handleRoleChange)
@@ -191,7 +140,7 @@ onMounted(loadOrders)
     <div class="page-head">
       <div>
         <h2 class="page-title">我的面交单</h2>
-        <p class="page-subtitle">面交时当面验货，核销码确认后再完成交易</p>
+        <p class="page-subtitle">约面交只是意向，卖家确认后才锁定商品；见面验货后由卖家点「已卖出」完成交易</p>
       </div>
       <el-button :icon="Refresh" :loading="loading" @click="loadOrders">刷新</el-button>
     </div>
@@ -205,9 +154,14 @@ onMounted(loadOrders)
       <el-card v-for="order in orders" :key="order.id" class="section-card" shadow="never">
         <div class="orders__head">
           <span class="orders__no">面交单号：{{ order.orderNo }}</span>
-          <el-tag :type="orderStatusTagType(order.statusText)" effect="dark" size="small">
-            {{ order.statusText }}
-          </el-tag>
+          <span class="orders__tags">
+            <el-tag v-if="role === 'seller' && isWaiting(order) && order.buyerConfirmed" type="success" effect="plain" size="small">
+              买家已确认收到
+            </el-tag>
+            <el-tag :type="orderStatusTagType(order.statusText)" effect="dark" size="small">
+              {{ order.statusText }}
+            </el-tag>
+          </span>
         </div>
 
         <div class="orders__main">
@@ -221,62 +175,65 @@ onMounted(loadOrders)
             </p>
             <p class="orders__point">
               <el-icon><Location /></el-icon>
-              {{ order.pointName || '待协商点位' }}
+              {{ order.pointName || '地点待协商（私聊里定）' }}
               <span v-if="order.pointGuide" class="text-muted">（{{ order.pointGuide }}）</span>
             </p>
             <p class="text-muted">
-              时间窗：{{ formatDateTime(order.timeSlotStart) }} ~ {{ formatDateTime(order.timeSlotEnd) }}
+              <template v-if="order.timeSlotStart && order.timeSlotEnd">
+                时间窗：{{ formatDateTime(order.timeSlotStart) }} ~ {{ formatDateTime(order.timeSlotEnd) }}
+              </template>
+              <template v-else>时间待协商（私聊里定）</template>
             </p>
             <p v-if="order.remark" class="text-muted">留言：{{ order.remark }}</p>
-          </div>
-          <div class="orders__code">
-            <template v-if="order.verifyCode && !isDone(order) && !isClosed(order)">
-              <p class="text-muted">核销码</p>
-              <p class="orders__code-value">{{ order.verifyCode }}</p>
-              <el-button size="small" text type="primary" @click="copyText(order.verifyCode)">复制</el-button>
-            </template>
           </div>
         </div>
 
         <div class="orders__actions">
           <el-button size="small" @click="router.push(`/item/${order.itemId}`)">查看商品</el-button>
 
-          <template v-if="role === 'seller' && isPendingSeller(order)">
+          <!-- 买家：还没确认的意向可以取消 -->
+          <el-button
+            v-if="role === 'buyer' && (isPending(order) || isWaiting(order))"
+            size="small"
+            plain
+            :loading="actionId === order.id"
+            @click="handleCancel(order)"
+          >
+            取消
+          </el-button>
+
+          <!-- 买家：到点收到货，点一下留痕（成交仍由卖家确认） -->
+          <el-button
+            v-if="role === 'buyer' && isWaiting(order) && !order.buyerConfirmed"
+            size="small"
+            type="success"
+            plain
+            :loading="actionId === order.id"
+            @click="handleReceived(order)"
+          >
+            我收到了
+          </el-button>
+          <span v-else-if="role === 'buyer' && isWaiting(order)" class="text-muted orders__hint">
+            已确认收到，等卖家完成交易
+          </span>
+
+          <!-- 卖家：接受才锁商品；拒绝/已卖出 收尾 -->
+          <template v-if="role === 'seller' && isPending(order)">
             <el-button size="small" type="primary" :loading="actionId === order.id" @click="handleAccept(order)">
-              接受
+              接受约面交
             </el-button>
             <el-button size="small" type="danger" plain :loading="actionId === order.id" @click="handleReject(order)">
               拒绝
             </el-button>
           </template>
-
-          <template v-if="role === 'buyer' && (isPendingSeller(order) || isWaiting(order))">
-            <el-button size="small" plain :loading="actionId === order.id" @click="handleCancel(order)">
-              取消面交单
-            </el-button>
-          </template>
-
-          <template v-if="isWaiting(order) || isVerified(order)">
-            <el-button
-              v-if="order.verifyCode"
-              size="small"
-              type="success"
-              :icon="Tickets"
-              @click="openCodeDialog(order)"
-            >
-              出示核销码
-            </el-button>
-            <el-button size="small" type="primary" plain @click="openVerifyDialog(order)">输入核销码核销</el-button>
-          </template>
-
           <el-button
-            v-if="canConfirm(order)"
+            v-if="role === 'seller' && isWaiting(order)"
             size="small"
             type="success"
             :loading="actionId === order.id"
-            @click="handleConfirm(order)"
+            @click="handleSold(order)"
           >
-            确认完成
+            已卖出（完成交易）
           </el-button>
         </div>
       </el-card>
@@ -297,25 +254,6 @@ onMounted(loadOrders)
       />
     </div>
 
-    <el-dialog v-model="verifyVisible" title="输入核销码" width="420px">
-      <p class="text-muted">请与同学当面核对商品后，输入对方出示的 6 位核销码。</p>
-      <el-input v-model="verifyCodeInput" maxlength="8" placeholder="请输入核销码" size="large" />
-      <template #footer>
-        <el-button @click="verifyVisible = false">取消</el-button>
-        <el-button type="primary" :loading="actionId === currentOrder?.id" @click="submitVerify">确认核销</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="codeVisible" title="我的核销码" width="420px">
-      <div class="orders__code-dialog">
-        <p class="text-muted">把这串数字出示给同学，核销后即可完成交易</p>
-        <p class="orders__code-big">{{ codeOrder?.verifyCode || '——' }}</p>
-        <el-tag v-if="codeOrder?.pointName" type="success" effect="plain">{{ codeOrder.pointName }}</el-tag>
-      </div>
-      <template #footer>
-        <el-button type="primary" @click="codeVisible = false">知道了</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -382,37 +320,23 @@ onMounted(loadOrders)
     color: #529b2e;
   }
 
-  &__code {
-    width: 120px;
-    text-align: center;
-  }
-
-  &__code-value {
-    margin: 4px 0;
-    color: #f56c6c;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 2px;
-  }
-
-  &__code-dialog {
-    text-align: center;
-  }
-
-  &__code-big {
-    margin: 12px 0;
-    color: #f56c6c;
-    font-size: 34px;
-    font-weight: 700;
-    letter-spacing: 6px;
+  &__tags {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   &__actions {
     display: flex;
+    align-items: center;
     gap: 8px;
     padding-top: 10px;
     border-top: 1px dashed #ebeef5;
     flex-wrap: wrap;
+  }
+
+  &__hint {
+    font-size: 12.5px;
   }
 
   &__pager {

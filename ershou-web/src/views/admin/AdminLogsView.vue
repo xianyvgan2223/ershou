@@ -61,7 +61,7 @@ onMounted(load)
         记录运营的每一次写操作（操作人、模块、动作、目标、变更前后、IP），用于事后追溯。
       </p>
       <div class="admin-logs__toolbar">
-        <el-select v-model="moduleFilter" placeholder="全部模块" clearable style="width: 150px" @change="search">
+        <el-select v-model="moduleFilter" filterable placeholder="全部模块" clearable style="width: 150px" @change="search">
           <el-option v-for="opt in MODULE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-input

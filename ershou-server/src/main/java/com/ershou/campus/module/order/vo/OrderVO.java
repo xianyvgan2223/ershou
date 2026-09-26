@@ -22,7 +22,6 @@ public class OrderVO {
     private LocalDateTime timeSlotEnd;
     private Integer status;
     private String statusText;
-    private String verifyCode;
     private Long buyerId;
     private String buyerName;
     private Long sellerId;

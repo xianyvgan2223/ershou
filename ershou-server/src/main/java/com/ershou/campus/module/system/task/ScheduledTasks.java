@@ -34,7 +34,13 @@ public class ScheduledTasks {
     private final StringRedisTemplate redis;
     private final CacheEvictor evictor;
 
-    /** 每分钟：释放超时未确认的锁库，让商品回到在售 */
+    /**
+     * 每分钟：释放超时的锁库，让商品回到在售。
+     *
+     * <p>锁只会在卖家"接受约面交"时加上（锁到时间窗结束 +2h），所以这里释放 = 双方
+     * 到点没成交。此时同一件商品上挂着的"待面交"单子也必须一起作废，否则它会永远
+     * 停在待面交，卖家在列表里看着像是还有一笔交易没完成。
+     */
     @Scheduled(cron = "0 * * * * ?")
     @Transactional(rollbackFor = Exception.class)
     public void releaseExpiredLocks() {
@@ -54,33 +60,40 @@ public class ScheduledTasks {
                 released.add(item.getId());
             }
         }
+        int expiredOrders = 0;
+        for (Long itemId : released) {
+            expiredOrders += orderMapper.update(null, Wrappers.<MeetupOrder>lambdaUpdate()
+                    .eq(MeetupOrder::getItemId, itemId)
+                    .eq(MeetupOrder::getStatus, 2)
+                    .set(MeetupOrder::getStatus, 5)
+                    .set(MeetupOrder::getCancelReason, "面交时间已过，双方未完成交易，自动失效"));
+        }
         TxHooks.afterCommit(() -> itemIndexService.syncByIds(released));
         TxHooks.afterCommit(() -> evictor.itemsChanged(released));
-        log.info("[task][release-lock] 释放 {} 件商品的锁库", count);
+        log.info("[task][release-lock] 释放 {} 件商品的锁库，作废 {} 张待面交单", count, expiredOrders);
     }
 
-    /** 每 5 分钟：卖家 2 小时未确认的面交单自动失效，并释放锁库 */
+    /**
+     * 每 5 分钟：卖家 48 小时没确认的约面交意向自动失效。
+     *
+     * <p>以前是 2 小时 —— 晚上 11 点约、第二天早上看就是"已失效"，太不近人情；
+     * 而且现在提交意向不锁库，挂着也占不到商品，放宽没有副作用。
+     */
     @Scheduled(cron = "0 */5 * * * ?")
     @Transactional(rollbackFor = Exception.class)
     public void expirePendingOrders() {
         List<MeetupOrder> pending = orderMapper.selectList(Wrappers.<MeetupOrder>lambdaQuery()
                 .eq(MeetupOrder::getStatus, 1)
-                .lt(MeetupOrder::getCreatedAt, LocalDateTime.now().minusHours(2)));
-        List<Long> restocked = new ArrayList<>(pending.size());
+                .lt(MeetupOrder::getCreatedAt, LocalDateTime.now().minusHours(48)));
         for (MeetupOrder order : pending) {
             MeetupOrder update = new MeetupOrder();
             update.setId(order.getId());
             update.setStatus(5);
-            update.setCancelReason("卖家超时未确认，自动失效");
+            update.setCancelReason("卖家超过 48 小时未确认，自动失效");
             orderMapper.updateById(update);
-            if (itemMapper.releaseLock(order.getItemId()) > 0) {
-                restocked.add(order.getItemId());
-            }
         }
-        TxHooks.afterCommit(() -> itemIndexService.syncByIds(restocked));
-        TxHooks.afterCommit(() -> evictor.itemsChanged(restocked));
         if (!pending.isEmpty()) {
-            log.info("[task][expire-order] {} 张面交单超时失效", pending.size());
+            log.info("[task][expire-order] {} 张面交意向超时失效（未锁库，无需释放商品）", pending.size());
         }
     }
 

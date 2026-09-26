@@ -23,12 +23,20 @@ public class OrderController {
 
     private final OrderService orderService;
 
-    @Operation(summary = "我的面交单（role=buyer|seller）")
+    @Operation(summary = "我的面交单（role=buyer|seller；可再按 itemId / status 过滤）")
     @GetMapping
     public Result<PageResult<OrderVO>> page(@RequestParam(defaultValue = "buyer") String role,
+                                           @RequestParam(required = false) Long itemId,
+                                           @RequestParam(required = false) Integer status,
                                            @RequestParam(defaultValue = "1") long pageNum,
                                            @RequestParam(defaultValue = "20") long pageSize) {
-        return Result.ok(orderService.page(StpUtil.getLoginIdAsLong(), role, pageNum, pageSize));
+        return Result.ok(orderService.page(StpUtil.getLoginIdAsLong(), role, itemId, status, pageNum, pageSize));
+    }
+
+    @Operation(summary = "我的面交待办数（顶栏红点：卖家待确认 + 买家待确认收货）")
+    @GetMapping("/todo-count")
+    public Result<Map<String, Object>> todoCount() {
+        return Result.ok(orderService.todoCount(StpUtil.getLoginIdAsLong()));
     }
 
     @Operation(summary = "直接约面交（单件）")
@@ -64,13 +72,7 @@ public class OrderController {
         return Result.ok();
     }
 
-    @Operation(summary = "核销（当面出示/输入 6 位码）")
-    @PostMapping("/{id}/verify")
-    public Result<Map<String, Object>> verify(@PathVariable Long id, @RequestBody OrderActionDTO dto) {
-        return Result.ok(orderService.verify(id, StpUtil.getLoginIdAsLong(), dto == null ? null : dto.getCode()));
-    }
-
-    @Operation(summary = "确认完成（双向确认）")
+    @Operation(summary = "确认成交（卖家点一次即完成；买家确认只留痕）")
     @PostMapping("/{id}/confirm")
     public Result<Map<String, Object>> confirm(@PathVariable Long id) {
         return Result.ok(orderService.confirm(id, StpUtil.getLoginIdAsLong()));

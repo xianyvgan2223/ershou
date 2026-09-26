@@ -20,6 +20,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                                   "/api/v1/search/status")
                         // 商品读接口公开；写接口（发布/下架）在 Controller 内自行校验登录
                         .notMatch("/api/v1/items", "/api/v1/items/*")
+                        // 用户主页公开（不含任何联系方式，见 UserService.publicProfile）
+                        .notMatch("/api/v1/users/*/profile")
                         .check(r -> StpUtil.checkLogin())))
                 .addPathPatterns("/**");
     }

@@ -1,23 +1,25 @@
 package com.ershou.campus.module.order.dto;
 
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.util.List;
 
+/**
+ * 购物车合并结算。
+ *
+ * <p>面交点与时间窗都<b>可不填</b>：不填表示"待协商"，约面交只需表达意向，
+ * 具体在哪见、几点见，双方在私聊里定，卖家确认后商品才锁定。
+ */
 @Data
 public class CheckoutDTO {
     @NotEmpty(message = "请选择要面交的商品")
     private List<Long> cartIds;
 
-    @NotNull(message = "请选择面交点")
     private Long pointId;
 
-    @NotNull(message = "请选择开始时间")
     private String timeSlotStart;
 
-    @NotNull(message = "请选择结束时间")
     private String timeSlotEnd;
 
     private String remark;

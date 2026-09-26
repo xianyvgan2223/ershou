@@ -46,6 +46,8 @@ export interface ItemVO {
 export interface ItemQuery extends PageQuery {
   keyword?: string
   categoryId?: number
+  /** 只看某个卖家（用户主页的"TA 的在售"用它） */
+  sellerId?: number
   sort?: ItemSort
 }
 

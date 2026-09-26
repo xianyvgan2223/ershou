@@ -3,19 +3,13 @@ package com.ershou.campus.module.order.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ershou.campus.module.order.entity.MeetupOrder;
 import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Update;
 
-import java.time.LocalDateTime;
-
+/**
+ * 面交单 Mapper。
+ *
+ * <p>核销相关的方法（markVerified / markFinished）已随"去掉核销码"一并删除：
+ * 成交判定改为卖家点一次确认，状态流转走 {@code OrderService#confirm} 的普通更新。
+ */
 @Mapper
 public interface MeetupOrderMapper extends BaseMapper<MeetupOrder> {
-
-    /** 条件更新核销：保证一次性使用（并发兜底） */
-    @Update("UPDATE meetup_order SET verified_at = #{now}, verified_by = #{userId} "
-            + "WHERE id = #{orderId} AND status = 2 AND verified_at IS NULL")
-    int markVerified(@Param("orderId") Long orderId, @Param("userId") Long userId, @Param("now") LocalDateTime now);
-
-    @Update("UPDATE meetup_order SET status = 3 WHERE id = #{orderId} AND status = 2")
-    int markFinished(@Param("orderId") Long orderId);
 }

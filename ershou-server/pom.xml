@@ -41,6 +41,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- 私聊实时通道：原生 WebSocket（/ws/chat）+ 业务层 Redis Pub/Sub 做多实例广播 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-websocket</artifactId>
+    </dependency>
 
     <!-- Elasticsearch：商品搜索（客户端版本由 Spring Boot 统一管理） -->
     <dependency>

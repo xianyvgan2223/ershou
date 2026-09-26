@@ -8,8 +8,13 @@ export interface CartItem {
   coverUrl: string
   price: number
   quantity: number
-  /** 商品状态，1 在售时可结算 */
+  /** 商品状态：2=在售（可结算）/ 3=已锁定 / 4=已售出 / 5=已下架 */
   status: number
+  /** 后端中文化状态文案 */
+  statusText?: string
+  /** 卖家设置的面交点 */
+  preferPointId?: number | null
+  preferPointName?: string | null
 }
 
 /** 后端已按卖家分组的购物车 */
@@ -28,14 +33,14 @@ export interface UpdateCartParams {
   quantity: number
 }
 
-/** 一键合并面交（结算）入参 */
+/** 一键合并面交（结算）入参；面交点与时间窗都可留空 = 待协商 */
 export interface CartCheckoutParams {
   cartIds: number[]
-  pointId: number
+  pointId?: number | null
   /** 'yyyy-MM-dd HH:mm:ss' */
-  timeSlotStart: string
+  timeSlotStart?: string | null
   /** 'yyyy-MM-dd HH:mm:ss' */
-  timeSlotEnd: string
+  timeSlotEnd?: string | null
   remark?: string
 }
 

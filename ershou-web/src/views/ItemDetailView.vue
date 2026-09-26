@@ -12,12 +12,16 @@ import {
 import { addFavorite, fetchItemDetail, removeFavorite } from '@/api/item'
 import type { ItemVO } from '@/api/item'
 import { addToCart } from '@/api/cart'
+import { openChatSession } from '@/api/chat'
+import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useUserStore } from '@/stores/user'
 import { conditionLabel, formatDateTime, formatPrice, nameInitial } from '@/utils/format'
 import { showTip } from '@/utils/feedback'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const { ensureLogin } = useAuthGuard()
 
 const itemId = computed(() => Number(route.params.id))
@@ -26,7 +30,9 @@ const loading = ref(false)
 const favorited = ref(false)
 const favLoading = ref(false)
 const cartLoading = ref(false)
+const chatLoading = ref(false)
 const activeImage = ref(0)
+const bookingVisible = ref(false)
 
 const images = computed<string[]>(() => {
   const current = item.value
@@ -83,14 +89,13 @@ async function toggleFavorite(): Promise<void> {
   }
 }
 
-async function handleAddCart(goCart: boolean): Promise<void> {
+async function handleAddCart(): Promise<void> {
   const current = item.value
   if (!current || !ensureLogin('登录后才能加入购物车')) return
   cartLoading.value = true
   try {
     await addToCart({ itemId: current.id, quantity: 1 })
-    showTip(goCart ? '已加入购物车，去选面交时间吧' : '已加入购物车')
-    if (goCart) router.push('/cart')
+    showTip('已加入购物车，可继续挑几件一起面交')
   } catch {
     // 响应拦截器已提示
   } finally {
@@ -98,9 +103,51 @@ async function handleAddCart(goCart: boolean): Promise<void> {
   }
 }
 
-function handleChat(): void {
+/** 可面交：在售 + 不是自己发布的 */
+const canBook = computed(() => item.value?.status === 2 && item.value?.seller?.id !== userStore.profile?.id)
+
+/**
+ * 「约面交」直接开预约弹窗（后端 POST /meetup-orders）。
+ * 之前这里只是加购物车再跳转，用户还得自己勾选、再找结算入口，等于约不成。
+ */
+function openBooking(): void {
+  const current = item.value
+  if (!current || !ensureLogin('登录后才能约面交')) return
+  if (current.seller?.id === userStore.profile?.id) {
+    showTip('这是你自己发布的商品', 'warning')
+    return
+  }
+  if (current.status !== 2) {
+    showTip(`商品${current.statusText || '当前不可面交'}，先在"我的收藏"里等它回来吧`, 'warning')
+    return
+  }
+  bookingVisible.value = true
+}
+
+function handleBooked(): void {
+  showTip('面交单已提交，等卖家确认')
+  router.push('/orders')
+}
+
+/** 看卖家主页（公开页面，未登录也能看） */
+function goSeller(): void {
+  const sellerId = item.value?.seller?.id
+  if (sellerId) router.push(`/user/${sellerId}`)
+}
+
+/** 私聊卖家：先建（或复用）会话，再带着 sessionId 跳聊天页 */
+async function handleChat(): Promise<void> {
   if (!ensureLogin('登录后才能私聊卖家')) return
-  showTip('私聊功能正在开发中，可先通过面交单留言联系卖家', 'info')
+  if (!item.value) return
+  chatLoading.value = true
+  try {
+    const session = await openChatSession(item.value.id)
+    router.push({ path: '/chat', query: { session: session.id } })
+  } catch {
+    // 响应拦截器已提示（例如对自己的商品发起会话 → 70001 不能和自己私聊）
+  } finally {
+    chatLoading.value = false
+  }
 }
 
 onMounted(loadItem)
@@ -167,13 +214,13 @@ onMounted(loadItem)
           </div>
 
           <div class="actions">
-            <el-button class="actions__primary" size="large" :loading="cartLoading" @click="handleAddCart(true)">
+            <el-button class="actions__primary" size="large" :disabled="!canBook" @click="openBooking">
               约面交
             </el-button>
-            <el-button size="large" :icon="ShoppingCart" :loading="cartLoading" @click="handleAddCart(false)">
+            <el-button size="large" :icon="ShoppingCart" :loading="cartLoading" @click="handleAddCart">
               加入购物车
             </el-button>
-            <el-button size="large" :icon="ChatDotRound" @click="handleChat">私聊卖家</el-button>
+            <el-button size="large" :icon="ChatDotRound" :loading="chatLoading" @click="handleChat">私聊卖家</el-button>
             <button class="fav-btn" :class="{ 'is-on': favorited }" type="button" :disabled="favLoading" @click="toggleFavorite">
               <el-icon><StarFilled v-if="favorited" /><Star v-else /></el-icon>
               <span>{{ favorited ? '已收藏' : '收藏' }}</span>
@@ -192,8 +239,11 @@ onMounted(loadItem)
         <aside class="side">
           <section class="panel">
             <h2 class="panel-title">卖家</h2>
-            <div class="seller">
-              <el-avatar :size="52" :src="item.seller?.avatar">{{ nameInitial(sellerName) }}</el-avatar>
+            <!-- 卖家卡片可点：进卖家主页看信用、在售与拉黑入口 -->
+            <div class="seller" :class="{ 'is-link': item.seller?.id }" @click="goSeller">
+              <el-avatar :size="52" :src="item.seller?.avatar || undefined">
+                {{ nameInitial(sellerName) }}
+              </el-avatar>
               <div class="seller__main">
                 <p class="seller__name">
                   {{ sellerName }}
@@ -201,6 +251,7 @@ onMounted(loadItem)
                 </p>
                 <p class="seller__sub">{{ item.seller?.shopName || '个人卖家 · 同校学生' }}</p>
               </div>
+              <span v-if="item.seller?.id" class="seller__more">主页 ›</span>
             </div>
 
             <div class="credit">
@@ -229,6 +280,14 @@ onMounted(loadItem)
       <p class="empty-state__desc">它可能已经被别的同学带走啦</p>
       <el-button class="empty-state__btn" round @click="router.push('/')">回到首页</el-button>
     </div>
+
+    <MeetupBookingDialog
+      v-if="item"
+      v-model="bookingVisible"
+      :item-id="item.id"
+      :prefer-point-id="item.preferPointId"
+      @success="handleBooked"
+    />
   </div>
 </template>
 
@@ -516,6 +575,22 @@ onMounted(loadItem)
   display: flex;
   align-items: center;
   gap: 12px;
+
+  // 可点击进主页时给一点反馈（其余场景保持静态卡片）
+  &.is-link {
+    cursor: pointer;
+
+    &:hover .seller__more {
+      color: var(--brand-600);
+    }
+  }
+
+  &__more {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--text-3);
+    font-size: 12px;
+  }
 
   &__name {
     display: flex;

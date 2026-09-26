@@ -3,6 +3,7 @@ package com.ershou.campus.module.order.dto;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+/** 单品直接约面交：面交点与时间窗都可不填（不填=待协商，私聊里定） */
 @Data
 public class CreateOrderDTO {
     @NotNull(message = "缺少商品")
@@ -10,13 +11,10 @@ public class CreateOrderDTO {
 
     private Integer quantity = 1;
 
-    @NotNull(message = "请选择面交点")
     private Long pointId;
 
-    @NotNull(message = "请选择开始时间")
     private String timeSlotStart;
 
-    @NotNull(message = "请选择结束时间")
     private String timeSlotEnd;
 
     private String remark;

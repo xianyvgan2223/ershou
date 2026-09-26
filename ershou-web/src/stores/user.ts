@@ -2,6 +2,8 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { fetchCurrentUser, login as loginApi } from '@/api/auth'
 import type { LoginParams, LoginResult, LoginUser, UserProfile } from '@/api/auth'
+import { updateMyProfile } from '@/api/user'
+import type { UpdateProfileParams } from '@/api/user'
 import { clearToken, getToken, setToken } from '@/utils/request'
 
 /**
@@ -47,6 +49,27 @@ export const useUserStore = defineStore('user', () => {
     return data
   }
 
+  /**
+   * 编辑资料（昵称 / 头像 / 学校校区 / 小铺信息）。
+   *
+   * 后端回的是更新后的完整资料，直接覆盖 profile；
+   * 同时同步登录概要里的昵称 / 头像 / 校区，否则顶栏和头像占位还停留在旧值。
+   */
+  async function updateProfile(params: UpdateProfileParams): Promise<UserProfile> {
+    const data = await updateMyProfile(params)
+    profile.value = data
+    if (userInfo.value) {
+      userInfo.value = {
+        ...userInfo.value,
+        nickname: data.nickname,
+        avatar: data.avatar,
+        campusId: data.campusId ?? userInfo.value.campusId,
+        campusName: data.campusName || userInfo.value.campusName,
+      }
+    }
+    return data
+  }
+
   /** 退出登录 */
   function logout(): void {
     token.value = ''
@@ -70,6 +93,7 @@ export const useUserStore = defineStore('user', () => {
     isAdmin,
     login,
     fetchProfile,
+    updateProfile,
     logout,
   }
 })

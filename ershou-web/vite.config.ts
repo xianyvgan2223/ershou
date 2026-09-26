@@ -6,6 +6,10 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import ElementPlus from 'unplugin-element-plus/vite'
 
+// 后端地址：默认本机 8080；需要同时跑第二个实例（例如 8081）时用环境变量覆盖，
+// 例如： $env:VITE_PROXY_TARGET='http://127.0.0.1:8081'; npm run dev
+const PROXY_TARGET = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
+
 // 校园二手交易平台 · 学生端构建配置
 export default defineConfig({
   plugins: [
@@ -35,7 +39,13 @@ export default defineConfig({
     open: false,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: PROXY_TARGET,
+        changeOrigin: true,
+      },
+      // 私聊 WebSocket：ws:true 让 Vite 把升级请求透传给后端（生产由 Nginx 同源反代）
+      '/ws': {
+        target: PROXY_TARGET.replace(/^http/, 'ws'),
+        ws: true,
         changeOrigin: true,
       },
     },

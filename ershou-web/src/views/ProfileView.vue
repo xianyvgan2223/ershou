@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Camera,
+  Edit,
   Goods,
   List,
   Location,
@@ -10,18 +12,33 @@ import {
   ShoppingCart,
   Star,
 } from '@element-plus/icons-vue'
+import ProfileEditDialog from '@/components/ProfileEditDialog.vue'
 import { useUserStore } from '@/stores/user'
-import { nameInitial } from '@/utils/format'
+import { formatDateTime, nameInitial } from '@/utils/format'
+import type { TagType } from '@/utils/format'
 
 const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(false)
+const editVisible = ref(false)
 
 const profile = computed(() => userStore.profile)
 const nickname = computed(() => userStore.nickname)
 const creditScore = computed(() => userStore.creditScore)
 /** 信用分换算成 5 星展示（满分 100） */
 const creditStars = computed(() => Math.max(0, Math.min(5, Math.round(creditScore.value / 20))))
+
+/** 身份徽章：identity_flag 位标记（1=商家 / 2=代卖员 / 4=校内邮箱已验证） */
+const badges = computed(() => {
+  const flag = userStore.identityFlag ?? 0
+  const list: { text: string; type: TagType }[] = []
+  if (flag & 1) list.push({ text: '商家', type: 'warning' })
+  if (flag & 2) list.push({ text: '代卖员', type: 'primary' })
+  if (flag & 4) list.push({ text: '校内邮箱已验证', type: 'success' })
+  return list
+})
+
+const joinedAt = computed(() => (profile.value?.createdAt ? formatDateTime(profile.value.createdAt) : ''))
 
 const entries = computed(() => {
   const base = [
@@ -49,6 +66,10 @@ async function loadProfile(): Promise<void> {
   }
 }
 
+function openEdit(): void {
+  editVisible.value = true
+}
+
 async function handleLogout(): Promise<void> {
   try {
     await ElMessageBox.confirm('确定要退出当前账号吗？', '退出登录', {
@@ -73,22 +94,36 @@ onMounted(() => {
   <div v-loading="loading" class="page profile">
     <el-card class="section-card profile__card" shadow="never">
       <div class="profile__head">
-        <el-avatar :size="72" :src="userStore.avatar">{{ nameInitial(nickname) }}</el-avatar>
+        <div class="profile__avatar" title="点击修改头像" @click="openEdit">
+          <el-avatar :size="80" :src="userStore.avatar || undefined">{{ nameInitial(nickname) }}</el-avatar>
+          <span class="profile__avatar-mask"><el-icon><Camera /></el-icon></span>
+        </div>
+
         <div class="profile__head-info">
           <h2 class="profile__name">
             {{ nickname }}
-            <el-tag v-if="userStore.identityFlag" size="small" type="success" effect="plain">已实名认证</el-tag>
-            <el-tag v-else size="small" type="info" effect="plain">未认证</el-tag>
+            <el-tag v-for="badge in badges" :key="badge.text" size="small" :type="badge.type" effect="plain">
+              {{ badge.text }}
+            </el-tag>
+            <el-tag v-if="userStore.isAdmin" size="small" type="danger" effect="plain">运营</el-tag>
           </h2>
           <p class="text-muted">
             {{ profile?.schoolName || '校园' }} · {{ profile?.campusName || userStore.campusName || '本校校区' }}
+            <template v-if="joinedAt"> · 加入于 {{ joinedAt }}</template>
           </p>
           <p class="text-muted">手机号：{{ profile?.phone || '未绑定' }}</p>
+          <p v-if="profile?.shopIntro" class="text-muted profile__intro">
+            小铺：{{ profile.shopIntro }}
+          </p>
         </div>
-        <div class="profile__credit">
-          <p class="profile__credit-score">{{ creditScore }}</p>
-          <el-rate :model-value="creditStars" disabled />
-          <p class="text-muted">{{ profile?.creditLevel || '信用良好' }}</p>
+
+        <div class="profile__aside">
+          <div class="profile__credit">
+            <p class="profile__credit-score">{{ creditScore }}</p>
+            <el-rate :model-value="creditStars" disabled />
+            <p class="text-muted">{{ profile?.creditLevel || '信用良好' }}</p>
+          </div>
+          <el-button type="primary" :icon="Edit" @click="openEdit">编辑资料</el-button>
         </div>
       </div>
 
@@ -139,6 +174,7 @@ onMounted(() => {
       <template #header><span class="profile__card-title">账号操作</span></template>
       <div class="profile__actions">
         <el-button type="primary" @click="router.push('/publish')">发布闲置</el-button>
+        <el-button :icon="Edit" @click="openEdit">编辑资料</el-button>
         <el-button :loading="loading" @click="loadProfile">刷新资料</el-button>
         <el-button type="danger" plain @click="handleLogout">退出登录</el-button>
       </div>
@@ -146,6 +182,8 @@ onMounted(() => {
         交易过程中请保持在校内公共区域面交；遇到问题可联系校园二手客服（学生服务号）。
       </p>
     </el-card>
+
+    <ProfileEditDialog v-model="editVisible" />
   </div>
 </template>
 
@@ -157,7 +195,32 @@ onMounted(() => {
     gap: 18px;
   }
 
+  &__avatar {
+    position: relative;
+    flex-shrink: 0;
+    cursor: pointer;
+    line-height: 0;
+
+    &:hover .profile__avatar-mask {
+      opacity: 1;
+    }
+  }
+
+  &__avatar-mask {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    border-radius: 50%;
+    background: rgb(15 23 42 / 46%);
+    color: #fff;
+    font-size: 20px;
+    opacity: 0;
+    place-items: center;
+    transition: opacity 0.2s ease;
+  }
+
   &__head-info {
+    min-width: 0;
     flex: 1;
 
     p {
@@ -169,9 +232,25 @@ onMounted(() => {
   &__name {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin: 0 0 8px;
     font-size: 20px;
+  }
+
+  &__intro {
+    overflow: hidden;
+    max-width: 520px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__aside {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: 10px;
   }
 
   &__credit {
@@ -254,6 +333,18 @@ onMounted(() => {
   &__note {
     margin: 14px 0 0;
     font-size: 12px;
+  }
+}
+
+@media (width <= 700px) {
+  .profile__head {
+    flex-wrap: wrap;
+  }
+
+  .profile__aside {
+    align-items: flex-start;
+    flex-direction: row;
+    width: 100%;
   }
 }
 </style>

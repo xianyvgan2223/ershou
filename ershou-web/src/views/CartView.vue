@@ -1,50 +1,62 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
-import { checkoutCart, fetchCart, removeCartItem, updateCartQuantity } from '@/api/cart'
+import { fetchCart, removeCartItem, updateCartQuantity } from '@/api/cart'
 import type { CartItem, CartSellerGroup, CheckoutResult } from '@/api/cart'
-import { fetchTradePoints, pointTypeLabel } from '@/api/map'
-import type { TradePoint } from '@/api/map'
-import { DEFAULT_CAMPUS_ID } from '@/utils/constants'
+import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
 import { formatPrice } from '@/utils/format'
 
 const router = useRouter()
 
 const groups = ref<CartSellerGroup[]>([])
-const tradePoints = ref<TradePoint[]>([])
 const loading = ref(false)
-const submitting = ref(false)
 const selectedIds = ref<number[]>([])
 const checkoutVisible = ref(false)
 const resultVisible = ref(false)
 const checkoutResult = ref<CheckoutResult | null>(null)
+/** 已经出现过的条目：新加入的自动勾选，老条目的勾选状态尊重用户操作 */
+const knownIds = new Set<number>()
 
-const checkoutForm = reactive({
-  pointId: undefined as number | undefined,
-  timeRange: [] as string[],
-  remark: '',
-})
+/** 只有「在售」能结算；已锁定 / 已售出 / 已下架的不能勾选 */
+function sellable(item: CartItem): boolean {
+  return item.status === 2
+}
 
 const allItems = computed<CartItem[]>(() => groups.value.flatMap((group) => group.items))
+const sellableItems = computed(() => allItems.value.filter(sellable))
 const selectedItems = computed(() => allItems.value.filter((item) => selectedIds.value.includes(item.cartId)))
 const totalPrice = computed(() =>
   selectedItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0),
 )
 const allChecked = computed(
-  () => allItems.value.length > 0 && selectedIds.value.length === allItems.value.length,
+  () => sellableItems.value.length > 0 && selectedItems.value.length === sellableItems.value.length,
 )
 const indeterminate = computed(
-  () => selectedIds.value.length > 0 && selectedIds.value.length < allItems.value.length,
+  () => selectedIds.value.length > 0 && selectedIds.value.length < sellableItems.value.length,
 )
+
+/**
+ * 同步勾选状态。
+ *
+ * 之前购物车加载后 selectedIds 一直是空数组 → 点「一键合并面交」只弹一句
+ * "请先勾选要一起面交的商品"，弹窗根本打不开，面交等于走不通。
+ * 现在：从商品页「约面交」进来的、以及新加入购物车的商品默认就勾上。
+ */
+function syncSelection(): void {
+  const sellableIds = sellableItems.value.map((item) => item.cartId)
+  const kept = selectedIds.value.filter((id) => sellableIds.includes(id))
+  const fresh = sellableIds.filter((id) => !knownIds.has(id))
+  selectedIds.value = Array.from(new Set([...kept, ...fresh]))
+  allItems.value.forEach((item) => knownIds.add(item.cartId))
+}
 
 async function loadCart(): Promise<void> {
   loading.value = true
   try {
     groups.value = await fetchCart()
-    const validIds = new Set(allItems.value.map((item) => item.cartId))
-    selectedIds.value = selectedIds.value.filter((id) => validIds.has(id))
+    syncSelection()
   } catch {
     groups.value = []
   } finally {
@@ -52,20 +64,13 @@ async function loadCart(): Promise<void> {
   }
 }
 
-async function loadTradePoints(): Promise<void> {
-  try {
-    tradePoints.value = await fetchTradePoints(DEFAULT_CAMPUS_ID)
-  } catch {
-    tradePoints.value = []
-  }
-}
-
 function toggleAll(checked: boolean): void {
-  selectedIds.value = checked ? allItems.value.map((item) => item.cartId) : []
+  selectedIds.value = checked ? sellableItems.value.map((item) => item.cartId) : []
 }
 
 function sellerChecked(group: CartSellerGroup): boolean {
-  return group.items.every((item) => selectedIds.value.includes(item.cartId))
+  const ids = group.items.filter(sellable).map((item) => item.cartId)
+  return ids.length > 0 && ids.every((id) => selectedIds.value.includes(id))
 }
 
 function handleItemCheck(item: CartItem, checked: string | number | boolean): void {
@@ -85,12 +90,21 @@ function handleSellerCheck(group: CartSellerGroup, checked: string | number | bo
 }
 
 function toggleSeller(group: CartSellerGroup, checked: boolean): void {
-  const ids = group.items.map((item) => item.cartId)
+  const ids = group.items.filter(sellable).map((item) => item.cartId)
   if (checked) {
     selectedIds.value = Array.from(new Set([...selectedIds.value, ...ids]))
   } else {
     selectedIds.value = selectedIds.value.filter((id) => !ids.includes(id))
   }
+}
+
+/** 点整行也能勾选：只有一个小方框太难发现了 */
+function toggleItem(item: CartItem): void {
+  if (!sellable(item)) {
+    ElMessage.info(`「${item.title}」${item.statusText || '当前不可面交'}，无法结算`)
+    return
+  }
+  handleItemCheck(item, !selectedIds.value.includes(item.cartId))
 }
 
 async function handleQuantityChange(item: CartItem, quantity: number | undefined): Promise<void> {
@@ -124,44 +138,24 @@ async function handleRemove(item: CartItem): Promise<void> {
 }
 
 function openCheckout(): void {
+  // 一件都没勾时先把可面交的都勾上：用户点了「合并面交」就是明确意图，
+  // 不该只回一句"请先勾选"把他挡在门外
   if (!selectedIds.value.length) {
-    ElMessage.warning('请先勾选要一起面交的商品')
+    selectedIds.value = sellableItems.value.map((item) => item.cartId)
+  }
+  if (!selectedIds.value.length) {
+    ElMessage.warning('购物车里没有可面交的商品（已锁定 / 已售出 / 已下架）')
     return
   }
-  checkoutForm.pointId = checkoutForm.pointId ?? tradePoints.value[0]?.id ?? undefined
   checkoutVisible.value = true
 }
 
-async function submitCheckout(): Promise<void> {
-  const pointId = checkoutForm.pointId
-  const [start, end] = checkoutForm.timeRange
-  if (!pointId) {
-    ElMessage.warning('请选择面交点')
-    return
-  }
-  if (!start || !end) {
-    ElMessage.warning('请选择面交时间窗')
-    return
-  }
-  submitting.value = true
-  try {
-    const result = await checkoutCart({
-      cartIds: selectedIds.value,
-      pointId,
-      timeSlotStart: start,
-      timeSlotEnd: end,
-      remark: checkoutForm.remark.trim(),
-    })
-    checkoutResult.value = result
-    checkoutVisible.value = false
-    resultVisible.value = true
-    selectedIds.value = []
-    await loadCart()
-  } catch {
-    // 响应拦截器已提示
-  } finally {
-    submitting.value = false
-  }
+function handleBooked(result: CheckoutResult): void {
+  checkoutResult.value = result
+  resultVisible.value = true
+  selectedIds.value = []
+  allItems.value.forEach((item) => knownIds.delete(item.cartId))
+  loadCart()
 }
 
 function goOrders(): void {
@@ -169,10 +163,7 @@ function goOrders(): void {
   router.push('/orders')
 }
 
-onMounted(() => {
-  loadCart()
-  loadTradePoints()
-})
+onMounted(loadCart)
 </script>
 
 <template>
@@ -200,25 +191,44 @@ onMounted(() => {
             </div>
           </template>
 
-          <div v-for="item in group.items" :key="item.cartId" class="cart__item">
+          <div
+            v-for="item in group.items"
+            :key="item.cartId"
+            class="cart__item"
+            :class="{ 'is-disabled': !sellable(item) }"
+            @click="toggleItem(item)"
+          >
             <el-checkbox
               :model-value="selectedIds.includes(item.cartId)"
+              :disabled="!sellable(item)"
+              @click.stop
               @change="(checked: string | number | boolean) => handleItemCheck(item, checked)"
             />
-            <el-image :src="item.coverUrl" fit="cover" class="cart__cover" @click="router.push(`/item/${item.itemId}`)" />
+            <el-image
+              :src="item.coverUrl"
+              fit="cover"
+              class="cart__cover"
+              @click.stop="router.push(`/item/${item.itemId}`)"
+            />
             <div class="cart__info">
-              <p class="cart__title" @click="router.push(`/item/${item.itemId}`)">{{ item.title }}</p>
-              <p class="text-muted">单价 ¥{{ formatPrice(item.price) }}</p>
+              <p class="cart__title" @click.stop="router.push(`/item/${item.itemId}`)">{{ item.title }}</p>
+              <p class="text-muted">
+                单价 ¥{{ formatPrice(item.price) }}
+                <el-tag v-if="!sellable(item)" size="small" type="info" effect="plain" class="cart__status">
+                  {{ item.statusText || '不可面交' }}
+                </el-tag>
+              </p>
             </div>
             <el-input-number
               :model-value="item.quantity"
               :min="1"
               :max="99"
               size="small"
+              @click.stop
               @change="(value: number | undefined) => handleQuantityChange(item, value)"
             />
             <span class="cart__subtotal">¥{{ formatPrice(item.price * item.quantity) }}</span>
-            <el-button text type="danger" :icon="Delete" @click="handleRemove(item)">移除</el-button>
+            <el-button text type="danger" :icon="Delete" @click.stop="handleRemove(item)">移除</el-button>
           </div>
         </el-card>
       </template>
@@ -236,51 +246,19 @@ onMounted(() => {
       >
         全选
       </el-checkbox>
-      <span class="cart__bar-count">已选 {{ selectedItems.length }} 件</span>
+      <span class="cart__bar-count">已选 {{ selectedItems.length }} / {{ sellableItems.length }} 件可面交</span>
       <span class="cart__bar-total">
         合计：<strong>¥{{ formatPrice(totalPrice) }}</strong>
       </span>
       <el-button type="primary" size="large" @click="openCheckout">一键合并面交</el-button>
     </div>
 
-    <el-dialog v-model="checkoutVisible" title="合并面交" width="520px">
-      <el-form label-width="90px">
-        <el-form-item label="面交点" required>
-          <el-select v-model="checkoutForm.pointId" placeholder="请选择面交点" style="width: 100%">
-            <el-option
-              v-for="point in tradePoints"
-              :key="point.id"
-              :label="`${point.name}（${pointTypeLabel(point.type)}）`"
-              :value="point.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="面交时间" required>
-          <el-date-picker
-            v-model="checkoutForm.timeRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="留言">
-          <el-input v-model="checkoutForm.remark" type="textarea" :rows="2" maxlength="100" show-word-limit placeholder="例如：我在图书馆三楼，可以提前十分钟到" />
-        </el-form-item>
-      </el-form>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="合并面交会把不同卖家的商品拆成多张面交单，但共用同一个面交点与时间窗。"
-      />
-      <template #footer>
-        <el-button @click="checkoutVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitCheckout">提交面交单</el-button>
-      </template>
-    </el-dialog>
+    <MeetupBookingDialog
+      v-model="checkoutVisible"
+      :cart-ids="selectedIds"
+      :item-count="selectedItems.length"
+      @success="handleBooked"
+    />
 
     <el-dialog v-model="resultVisible" title="面交单已提交" width="520px">
       <p class="cart__result-tip">
@@ -313,10 +291,20 @@ onMounted(() => {
     gap: 12px;
     padding: 12px 0;
     border-bottom: 1px dashed #ebeef5;
+    cursor: pointer;
 
     &:last-child {
       border-bottom: none;
     }
+
+    &.is-disabled {
+      opacity: 0.66;
+      cursor: not-allowed;
+    }
+  }
+
+  &__status {
+    margin-left: 6px;
   }
 
   &__cover {

@@ -166,7 +166,7 @@ onMounted(() => {
           @keyup.enter="search"
           @clear="search"
         />
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 150px" @change="search">
+        <el-select v-model="statusFilter" filterable placeholder="全部状态" clearable style="width: 150px" @change="search">
           <el-option v-for="opt in STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-button @click="search">查询</el-button>

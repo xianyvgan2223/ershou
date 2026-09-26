@@ -35,6 +35,14 @@ public enum ResultCode {
     ADMIN_REASON_REQUIRED(60003, "请填写驳回原因"),
     ADMIN_SELF_OPERATION(60004, "不能对自己执行该操作"),
 
+    CHAT_SELF(70001, "不能和自己私聊"),
+    CHAT_NOT_FOUND(70002, "会话不存在或无权访问"),
+    CHAT_LIMIT(70003, "今日私聊条数已达上限（新账号限制），明天再来吧"),
+    CHAT_CONTENT_INVALID(70004, "消息内容不合法"),
+    CHAT_SEND_FAILED(70005, "消息发送失败，请重试"),
+    CHAT_BLOCKED(70006, "你们之间已拉黑，无法继续私聊"),
+    CHAT_RECALL_DENIED(70007, "只能撤回自己 2 分钟内发送的消息"),
+
     SYSTEM_ERROR(90001, "系统开小差了，请稍后再试"),
     STORAGE_ERROR(90003, "文件存储服务不可用");
 

@@ -83,6 +83,21 @@ public final class RedisKeys {
         return "ershou:dict:campus:" + campusId;
     }
 
+    /** 私聊未读快照：Hash，field=sessionId，value=未读数（DB 为权威，这里是顶栏红点的快速读取路径） */
+    public static String chatUnread(Long userId) {
+        return "ershou:chat:unread:" + userId;
+    }
+
+    /** 私聊在线心跳：连接建立与 ping 时刷新 TTL */
+    public static String chatOnline(Long userId) {
+        return "ershou:chat:online:" + userId;
+    }
+
+    /** 私聊跨实例广播频道（Pub/Sub） */
+    public static String chatChannel() {
+        return "ershou:chat:channel:msg";
+    }
+
     /** 运营概览统计缓存 */
     public static String adminDashboard() {
         return "ershou:admin:dashboard";
