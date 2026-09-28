@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/api_repository.dart';
+import '../data/api_repository2.dart';
 import '../data/models.dart';
 import 'config/server_config.dart';
 import 'config/server_config_service.dart';
@@ -40,6 +41,55 @@ final authRepositoryProvider = Provider<AuthRepository>(
 final itemRepositoryProvider = Provider<ItemRepository>(
   (ref) => ItemRepository(ref.watch(apiClientProvider)),
 );
+
+final chatRepositoryProvider = Provider<ChatRepository>(
+  (ref) => ChatRepository(ref.watch(apiClientProvider)),
+);
+
+final mapRepositoryProvider = Provider<MapRepository>(
+  (ref) => MapRepository(ref.watch(apiClientProvider)),
+);
+
+final orderRepositoryProvider = Provider<OrderRepository>(
+  (ref) => OrderRepository(ref.watch(apiClientProvider)),
+);
+
+final userRepositoryProvider = Provider<UserRepository>(
+  (ref) => UserRepository(ref.watch(apiClientProvider)),
+);
+
+final itemWriteRepositoryProvider = Provider<ItemWriteRepository>(
+  (ref) => ItemWriteRepository(ref.watch(apiClientProvider)),
+);
+
+/// 底部导航选中下标（0 首页 / 1 消息 / 2 地图 / 3 我的）。
+final navIndexProvider = NotifierProvider<NavIndexNotifier, int>(NavIndexNotifier.new);
+
+class NavIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void select(int index) => state = index;
+}
+
+/// 未读消息数（底部导航红点）。
+final unreadProvider = NotifierProvider<UnreadNotifier, int>(UnreadNotifier.new);
+
+class UnreadNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  Future<void> refresh() async {
+    if (!ref.read(authProvider).isLoggedIn) return;
+    try {
+      state = await ref.read(chatRepositoryProvider).unreadTotal();
+    } catch (_) {
+      // 未读数不是关键路径，失败静默
+    }
+  }
+
+  void clear() => state = 0;
+}
 
 /// 当前生效的服务器地址（登录前也要能用，所以与 token 分开管）。
 final activeServerProvider =

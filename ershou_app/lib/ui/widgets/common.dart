@@ -7,7 +7,7 @@ class AppCard extends StatelessWidget {
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(16),
+    this.padding = const EdgeInsets.all(AppSpacing.cardPadding),
     this.radius = AppRadius.card,
     this.onTap,
     this.color = Colors.white,
@@ -185,7 +185,7 @@ class SkeletonGrid extends StatelessWidget {
         crossAxisCount: columns,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.72,
+        childAspectRatio: 0.60,
       ),
       itemCount: count,
       itemBuilder: (_, __) => Container(

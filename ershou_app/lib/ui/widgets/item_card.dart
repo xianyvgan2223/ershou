@@ -60,7 +60,7 @@ class ItemCard extends ConsumerWidget {
               ],
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              padding: const EdgeInsets.fromLTRB(9, 7, 9, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

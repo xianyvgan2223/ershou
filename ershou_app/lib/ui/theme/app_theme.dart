@@ -18,9 +18,29 @@ class AppColors {
 class AppRadius {
   const AppRadius._();
 
-  static const card = 16.0;
+  static const card = 13.0;
   static const chip = 999.0;
-  static const field = 14.0;
+  static const field = 11.0;
+}
+
+/// 页面留白：统一收窄，避免「到处是边框」的感觉。
+class AppSpacing {
+  const AppSpacing._();
+
+  /// 卡片内边距
+  static const cardPadding = 11.0;
+
+  /// 列表/网格的外边距
+  static const page = 9.0;
+
+  /// 卡片之间的间距
+  static const gap = 8.0;
+
+  /// 顶部 AppBar 高度（Flutter 默认 56，太高）
+  static const appBarHeight = 42.0;
+
+  /// 底部导航高度（原本 58，逐轮压到 46）
+  static const navBarHeight = 44.0;
 }
 
 class AppTheme {
@@ -44,8 +64,12 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 0.5,
         centerTitle: false,
+        // 顶栏压到 44（Flutter 默认 56 太占地方），图标与标题同步缩小
+        toolbarHeight: AppSpacing.appBarHeight,
+        iconTheme: IconThemeData(size: 21, color: AppColors.ink),
+        actionsIconTheme: IconThemeData(size: 21, color: AppColors.inkSoft),
         titleTextStyle: TextStyle(
-          fontSize: 19,
+          fontSize: 16.5,
           fontWeight: FontWeight.w700,
           color: AppColors.ink,
         ),
@@ -59,8 +83,10 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 14),
+        // 输入框内容与内边距一起收窄，输入区矮一点、字小一点
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        isDense: true,
+        hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 13),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.field),
           borderSide: const BorderSide(color: AppColors.line),

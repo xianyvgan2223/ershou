@@ -73,6 +73,7 @@ class Item {
     this.categoryId,
     this.categoryName = '',
     this.campusId,
+    this.preferPointId,
     this.preferPointName = '',
     this.preferPointGuide = '',
     this.status = 0,
@@ -97,6 +98,7 @@ class Item {
   final int? categoryId;
   final String categoryName;
   final int? campusId;
+  final int? preferPointId;
   final String preferPointName;
   final String preferPointGuide;
   final int status;
@@ -127,6 +129,7 @@ class Item {
         categoryId: (json['categoryId'] as num?)?.toInt(),
         categoryName: (json['categoryName'] as String?) ?? '',
         campusId: (json['campusId'] as num?)?.toInt(),
+        preferPointId: (json['preferPointId'] as num?)?.toInt(),
         preferPointName: (json['preferPointName'] as String?) ?? '',
         preferPointGuide: (json['preferPointGuide'] as String?) ?? '',
         status: (json['status'] as num?)?.toInt() ?? 0,
@@ -172,6 +175,8 @@ class AppUser {
     this.campusName = '',
     this.creditScore = 0,
     this.shopName = '',
+    this.publishLimit = 0,
+    this.roleFlags = 0,
     this.isAdmin = false,
   });
 
@@ -183,6 +188,12 @@ class AppUser {
   final String campusName;
   final int creditScore;
   final String shopName;
+
+  /// 剩余发布额度（后端 publishLimit，个人页展示用）
+  final int publishLimit;
+
+  /// 1 普通 / 2 商家 / 4 代卖员 / 8 运营
+  final int roleFlags;
   final bool isAdmin;
 
   factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
@@ -194,6 +205,8 @@ class AppUser {
         campusName: (json['campusName'] as String?) ?? '',
         creditScore: (json['creditScore'] as num?)?.toInt() ?? 0,
         shopName: (json['shopName'] as String?) ?? '',
+        publishLimit: (json['publishLimit'] as num?)?.toInt() ?? 0,
+        roleFlags: (json['roleFlags'] as num?)?.toInt() ?? 0,
         isAdmin: (json['isAdmin'] as bool?) ?? false,
       );
 }

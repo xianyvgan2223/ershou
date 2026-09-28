@@ -8,6 +8,7 @@ import '../../data/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
+import 'chat_page.dart';
 
 class ItemDetailPage extends ConsumerStatefulWidget {
   const ItemDetailPage({super.key, required this.itemId});
@@ -24,6 +25,9 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   bool _loading = true;
   int _page = 0;
   bool _descExpanded = false;
+  bool _favorited = false;
+  bool _favoriteBusy = false;
+  bool _meetupBusy = false;
 
   @override
   void initState() {
@@ -41,6 +45,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       if (!mounted) return;
       setState(() {
         _item = item;
+        _favorited = item?.favorited ?? false;
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -62,6 +67,91 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
   void _requireLogin() {
     showToast(context, '这个功能需要先登录');
+  }
+
+  /// 收藏 / 取消收藏（乐观更新，失败回滚）。
+  Future<void> _toggleFavorite() async {
+    final item = _item;
+    if (item == null) return;
+    if (!_loggedIn) {
+      _requireLogin();
+      return;
+    }
+    if (_favoriteBusy) return;
+    setState(() {
+      _favoriteBusy = true;
+      _favorited = !_favorited;
+    });
+    try {
+      final repo = ref.read(itemWriteRepositoryProvider);
+      if (_favorited) {
+        await repo.addFavorite(item.id);
+      } else {
+        await repo.removeFavorite(item.id);
+      }
+      if (!mounted) return;
+      setState(() => _favoriteBusy = false);
+      showToast(context, _favorited ? '已收藏' : '已取消收藏');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _favorited = !_favorited;
+        _favoriteBusy = false;
+      });
+      showToast(context, e.message);
+    }
+  }
+
+  /// 从商品发起（或复用）会话，然后进聊天页。
+  Future<void> _openChat() async {
+    final item = _item;
+    if (item == null) return;
+    if (!_loggedIn) {
+      _requireLogin();
+      return;
+    }
+    try {
+      final session = await ref.read(chatRepositoryProvider).openWithItem(item.id);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => ChatPage(session: session)),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      showToast(context, e.message);
+    } catch (e) {
+      if (!mounted) return;
+      showToast(context, '打不开会话：' + e.toString());
+    }
+  }
+
+  /// 约面交：创建面交单（默认待协商，具体时间在私聊里定）。
+  Future<void> _createMeetup() async {
+    final item = _item;
+    if (item == null) return;
+    if (!_loggedIn) {
+      _requireLogin();
+      return;
+    }
+    if (_meetupBusy) return;
+    setState(() => _meetupBusy = true);
+    try {
+      await ref.read(orderRepositoryProvider).create(
+            itemId: item.id,
+            pointId: item.preferPointId,
+          );
+      if (!mounted) return;
+      setState(() => _meetupBusy = false);
+      showToast(context, '已发起约面交，等卖家确认');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _meetupBusy = false);
+      showToast(context, e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _meetupBusy = false);
+      showToast(context, '约面交失败：' + e.toString());
+    }
   }
 
   @override
@@ -306,7 +396,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             ),
           ),
           OutlinedButton(
-            onPressed: () => _loggedIn ? showToast(context, '私聊功能下一步接入') : _requireLogin(),
+            onPressed: _openChat,
             style: OutlinedButton.styleFrom(minimumSize: const Size(0, 34)),
             child: const Text('私聊', style: TextStyle(fontSize: 13)),
           ),
@@ -408,22 +498,20 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       child: Row(
         children: [
           _actionIcon(
-            icon: item.favorited ? Icons.favorite : Icons.favorite_border,
+            icon: _favorited ? Icons.favorite : Icons.favorite_border,
             label: '收藏',
-            color: item.favorited ? AppColors.price : AppColors.inkSoft,
-            onTap: () => _loggedIn ? showToast(context, '收藏接口下一轮接入') : _requireLogin(),
+            color: _favorited ? AppColors.price : AppColors.inkSoft,
+            onTap: _toggleFavorite,
           ),
           _actionIcon(
             icon: Icons.chat_bubble_outline,
             label: '私聊',
-            onTap: () => _loggedIn ? showToast(context, '私聊功能下一步接入') : _requireLogin(),
+            onTap: _openChat,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: FilledButton(
-              onPressed: onSale
-                  ? () => _loggedIn ? showToast(context, '约面交下一轮接入') : _requireLogin()
-                  : null,
+              onPressed: onSale && !_meetupBusy ? _createMeetup : null,
               style: FilledButton.styleFrom(
                 backgroundColor: onSale ? AppColors.brand : AppColors.inkFaint,
               ),
