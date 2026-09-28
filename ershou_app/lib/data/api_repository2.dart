@@ -256,6 +256,43 @@ class ItemWriteRepository {
         const PageResult<Item>(total: 0, pageNum: 1, pageSize: 20, records: []);
   }
 
+  /// 编辑已发布的商品（在售 / 已下架都能改；已售出不能改）。
+  ///
+  /// 只传改动的字段：后端把 null 当成「这一项不动」。
+  /// 改了标题或描述会重新过机审，命中禁售词抛 ApiException(50001)。
+  Future<Map<String, dynamic>> update(
+    int itemId, {
+    String? title,
+    String? description,
+    int? categoryId,
+    int? conditionLevel,
+    double? price,
+    double? originalPrice,
+    int? negotiable,
+    int? stock,
+    int? isUnique,
+    List<String>? images,
+    int? preferPointId,
+  }) async {
+    final env = await _api.envelope<Map<String, dynamic>>(
+      () => _api.dio.put<dynamic>('/items/' + itemId.toString(), data: {
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+        if (categoryId != null) 'categoryId': categoryId,
+        if (conditionLevel != null) 'conditionLevel': conditionLevel,
+        if (price != null) 'price': price,
+        if (originalPrice != null) 'originalPrice': originalPrice,
+        if (negotiable != null) 'negotiable': negotiable,
+        if (stock != null) 'stock': stock,
+        if (isUnique != null) 'isUnique': isUnique,
+        if (images != null && images.isNotEmpty) 'images': images,
+        if (preferPointId != null) 'preferPointId': preferPointId,
+      }),
+      parse: (data) => (data as Map).cast<String, dynamic>(),
+    );
+    return env.data ?? const {};
+  }
+
   Future<void> offline(int itemId) => _api.envelope<void>(
         () => _api.dio.post<dynamic>('/items/' + itemId.toString() + '/offline'),
       );

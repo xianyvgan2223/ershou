@@ -90,6 +90,31 @@ export function publishItem(params: PublishItemParams): Promise<PublishItemResul
   return http.post<PublishItemResult>('/items', params)
 }
 
+/**
+ * PUT /items/{id} 编辑入参。
+ *
+ * 字段全部可选：null/undefined 表示不改这一项，只提交用户真正改过的字段。
+ * 改了标题或描述后端会重新过机审（命中禁售词直接拦截、可疑词打回「审核中」）。
+ */
+export interface UpdateItemParams {
+  title?: string
+  description?: string
+  categoryId?: number
+  conditionLevel?: number
+  price?: number
+  originalPrice?: number | null
+  negotiable?: 0 | 1
+  stock?: number
+  isUnique?: 0 | 1
+  images?: string[]
+  preferPointId?: number | null
+}
+
+/** 编辑已发布的商品（在售 / 已下架都能改；已售出的不能改） */
+export function updateItem(id: number, params: UpdateItemParams): Promise<PublishItemResult> {
+  return http.put<PublishItemResult>(`/items/${id}`, params)
+}
+
 /** 下架商品 */
 export function offlineItem(id: number): Promise<null> {
   return http.post<null>(`/items/${id}/offline`)

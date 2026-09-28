@@ -319,6 +319,17 @@ class ItemFeedNotifier extends Notifier<ItemFeedState> {
     }
   }
 
+  /// 卡片上点了收藏星：把列表里这一条的收藏态同步过去，
+  /// 用户从详情页返回时也能看到刚点亮的状态。
+  void setFavorited(int itemId, bool favorited) {
+    final index = state.items.indexWhere((i) => i.id == itemId);
+    if (index < 0) return;
+    final next = [...state.items];
+    final old = next[index];
+    next[index] = old.copyWith(favorited: favorited);
+    state = state.copyWith(items: next);
+  }
+
   Future<void> search(String keyword) async {
     state = state.copyWith(keyword: keyword);
     await refresh();

@@ -67,6 +67,9 @@ class Item {
     this.price = 0,
     this.originalPrice,
     this.negotiable = 0,
+    this.conditionLevel,
+    this.stock = 1,
+    this.isUnique,
     this.conditionText = '',
     this.coverUrl = '',
     this.images = const [],
@@ -92,6 +95,9 @@ class Item {
   final double price;
   final double? originalPrice;
   final int negotiable;
+  final int? conditionLevel;
+  final int stock;
+  final int? isUnique;
   final String conditionText;
   final String coverUrl;
   final List<String> images;
@@ -120,6 +126,9 @@ class Item {
         price: _toDouble(json['price']),
         originalPrice: json['originalPrice'] == null ? null : _toDouble(json['originalPrice']),
         negotiable: (json['negotiable'] as num?)?.toInt() ?? 0,
+        conditionLevel: (json['conditionLevel'] as num?)?.toInt(),
+        stock: (json['stock'] as num?)?.toInt() ?? 1,
+        isUnique: (json['isUnique'] as num?)?.toInt(),
         conditionText: (json['conditionText'] as String?) ?? '',
         coverUrl: (json['coverUrl'] as String?) ?? '',
         images: ((json['images'] as List?) ?? const [])
@@ -142,6 +151,36 @@ class Item {
             ? Seller.fromJson((json['seller'] as Map).cast<String, dynamic>())
             : null,
         highlightTitle: json['highlightTitle'] as String?,
+      );
+
+  /// 只用于局部更新（目前只有收藏态），其余字段原样带过来。
+  Item copyWith({bool? favorited, int? favCount}) => Item(
+        id: id,
+        title: title,
+        description: description,
+        price: price,
+        originalPrice: originalPrice,
+        negotiable: negotiable,
+        conditionLevel: conditionLevel,
+        stock: stock,
+        isUnique: isUnique,
+        conditionText: conditionText,
+        coverUrl: coverUrl,
+        images: images,
+        categoryId: categoryId,
+        categoryName: categoryName,
+        campusId: campusId,
+        preferPointId: preferPointId,
+        preferPointName: preferPointName,
+        preferPointGuide: preferPointGuide,
+        status: status,
+        statusText: statusText,
+        viewCount: viewCount,
+        favCount: favCount ?? this.favCount,
+        favorited: favorited ?? this.favorited,
+        publishedAt: publishedAt,
+        seller: seller,
+        highlightTitle: highlightTitle,
       );
 
   static double _toDouble(Object? v) {

@@ -27,12 +27,31 @@ export function conditionLabel(level?: number | null): string {
   return CONDITION_TEXT[level] ?? `${level} 成新`
 }
 
-/** 商品状态：1 在售 / 2 已售 / 3 已下架（后端未下发 statusText，这里做兜底映射） */
+/**
+ * 商品状态枚举 —— **以数据库 item.status 为准**：
+ * 1 审核中 / 2 在售 / 3 已锁定（有人约了面交）/ 4 已售出 / 5 已下架 / 6 违规下架。
+ *
+ * 历史坑：这里曾经写成「1 在售 / 2 已售 / 3 已下架」，和 Detail/Cart 里用的 status===2（在售）
+ * 自相矛盾，导致「我的发布」三个 tab 全部错位（在售的商品被显示成已售）。
+ * 所有 status 判断请统一用 ITEM_STATUS 里的常量，别再写字面量。
+ */
+export const ITEM_STATUS = {
+  REVIEWING: 1,
+  ON_SALE: 2,
+  LOCKED: 3,
+  SOLD: 4,
+  OFFLINE: 5,
+  VIOLATION: 6,
+} as const
+
 const ITEM_STATUS_TEXT: Record<number, string> = {
   0: '待审核',
-  1: '在售',
-  2: '已售',
-  3: '已下架',
+  1: '审核中',
+  2: '在售',
+  3: '已锁定',
+  4: '已售出',
+  5: '已下架',
+  6: '违规下架',
 }
 
 export type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
@@ -44,14 +63,17 @@ export function itemStatusLabel(status?: number | null): string {
 
 export function itemStatusTagType(status?: number | null): TagType {
   switch (status) {
-    case 1:
+    case ITEM_STATUS.ON_SALE:
       return 'success'
-    case 2:
-      return 'info'
-    case 3:
+    case ITEM_STATUS.LOCKED:
       return 'warning'
-    case 0:
+    case ITEM_STATUS.SOLD:
+    case ITEM_STATUS.OFFLINE:
+      return 'info'
+    case ITEM_STATUS.REVIEWING:
       return 'primary'
+    case ITEM_STATUS.VIOLATION:
+      return 'danger'
     default:
       return 'info'
   }

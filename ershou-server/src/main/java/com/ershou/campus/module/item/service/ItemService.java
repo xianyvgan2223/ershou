@@ -18,6 +18,7 @@ import com.ershou.campus.module.ai.ContentAuditService;
 import com.ershou.campus.module.cart.entity.Favorite;
 import com.ershou.campus.module.cart.mapper.FavoriteMapper;
 import com.ershou.campus.module.item.dto.ItemPublishDTO;
+import com.ershou.campus.module.item.dto.ItemUpdateDTO;
 import com.ershou.campus.module.item.dto.ItemQueryDTO;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
@@ -277,6 +278,109 @@ public class ItemService {
         data.put("itemId", item.getId());
         data.put("status", status);
         data.put("statusText", statusText(status));
+        return data;
+    }
+
+    /**
+     * 编辑自己发布的商品（标题 / 价格 / 描述 / 图片…）。
+     *
+     * <p>规则：
+     * <ul>
+     *   <li>只能改自己的商品；已售出的不能改（留着交易记录）；
+     *   <li>改了标题或描述就**重新过一遍机审**：命中禁售词直接拒绝、可疑词把商品打回「审核中」；
+     *   <li>原本是「审核中」的商品，这次审核通过就自动上架；
+     *   <li>提交事务后同步 ES 索引 + 清 Redis 详情缓存，保证列表/详情立刻看到新值。
+     * </ul>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> update(Long itemId, ItemUpdateDTO dto, Long userId) {
+        Item item = itemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BizException(ResultCode.ITEM_NOT_FOUND);
+        }
+        if (!Objects.equals(item.getSellerId(), userId)) {
+            throw new BizException(ResultCode.ITEM_NOT_OWNER);
+        }
+        if (item.getStatus() != null && item.getStatus() == 4) {
+            throw new BizException(ResultCode.ITEM_SOLD, "商品已售出，不能再改价格和标题");
+        }
+
+        Item update = new Item();
+        update.setId(itemId);
+
+        String newTitle = StringUtils.hasText(dto.getTitle()) ? dto.getTitle().trim() : item.getTitle();
+        String newDescription = dto.getDescription() != null ? dto.getDescription() : item.getDescription();
+        boolean textChanged = !Objects.equals(newTitle, item.getTitle())
+                || !Objects.equals(newDescription, item.getDescription());
+
+        Integer newStatus = item.getStatus();
+        if (textChanged) {
+            AuditResult audit = auditService.auditText(
+                    newTitle + " " + (newDescription == null ? "" : newDescription), "item");
+            if (audit.decision() == AuditDecision.BLOCK) {
+                throw new BizException(ResultCode.CONTENT_VIOLATION, audit.reason());
+            }
+            update.setAuditReason(audit.reason());
+            if (audit.decision() == AuditDecision.REVIEW) {
+                newStatus = 1;
+                update.setAuditResult(null);
+            } else {
+                update.setAuditResult(1);
+                // 原来是「审核中」的商品，这次过了就放出去
+                if (item.getStatus() != null && item.getStatus() == 1) {
+                    newStatus = 2;
+                }
+            }
+            update.setStatus(newStatus);
+        }
+
+        if (StringUtils.hasText(dto.getTitle())) {
+            update.setTitle(newTitle);
+        }
+        if (dto.getDescription() != null) {
+            update.setDescription(newDescription);
+        }
+        if (dto.getCategoryId() != null) {
+            update.setCategoryId(dto.getCategoryId());
+        }
+        if (dto.getConditionLevel() != null) {
+            update.setConditionLevel(dto.getConditionLevel());
+        }
+        if (dto.getPrice() != null) {
+            update.setPrice(dto.getPrice());
+        }
+        if (dto.getOriginalPrice() != null) {
+            update.setOriginalPrice(dto.getOriginalPrice());
+        }
+        if (dto.getNegotiable() != null) {
+            update.setNegotiable(dto.getNegotiable());
+        }
+        if (dto.getStock() != null) {
+            update.setStock(dto.getStock());
+        }
+        if (dto.getIsUnique() != null) {
+            update.setIsUnique(dto.getIsUnique());
+        }
+        if (dto.getImages() != null && !dto.getImages().isEmpty()) {
+            update.setImages(writeJson(dto.getImages()));
+            update.setCoverUrl(dto.getImages().get(0));
+        }
+        if (dto.getPreferPointId() != null) {
+            update.setPreferPointId(dto.getPreferPointId());
+        }
+        if (dto.getVideoUrl() != null) {
+            update.setVideoUrl(dto.getVideoUrl());
+        }
+
+        itemMapper.updateById(update);
+        TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("itemId", itemId);
+        data.put("status", newStatus);
+        data.put("statusText", statusText(newStatus));
+        log.info("[item][update][{}][{}] textChanged={} status={}", itemId, userId, textChanged, newStatus);
         return data;
     }
 

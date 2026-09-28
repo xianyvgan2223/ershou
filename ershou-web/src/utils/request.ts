@@ -126,6 +126,9 @@ export const http = {
   post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return request<T>({ url, method: 'POST', data, ...config })
   },
+  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+    return request<T>({ url, method: 'PUT', data, ...config })
+  },
   patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return request<T>({ url, method: 'PATCH', data, ...config })
   },

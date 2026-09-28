@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/item_tile.dart';
 import 'item_detail_page.dart';
+import 'publish_page.dart';
 
 class MyItemsPage extends ConsumerStatefulWidget {
   const MyItemsPage({super.key});
@@ -107,13 +108,43 @@ class _MyItemsPageState extends ConsumerState<MyItemsPage> {
                               builder: (_) => ItemDetailPage(itemId: item.id),
                             ))
                             .then((_) => _load()),
-                        trailing: item.onSale
-                            ? TextButton(
+                        trailing: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            // 已售出的不让改（后端也会拦），其余都能编辑标题和价格
+                            if (item.onSale || item.statusText == '已下架')
+                              TextButton(
+                                onPressed: () async {
+                                  final saved = await Navigator.of(context).push<bool>(
+                                    MaterialPageRoute<bool>(
+                                      builder: (_) => PublishPage(editing: item),
+                                    ),
+                                  );
+                                  if (saved == true) await _load();
+                                },
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  minimumSize: const Size(0, 30),
+                                ),
+                                child: const Text('编辑',
+                                    style: TextStyle(fontSize: 12.5)),
+                              ),
+                            if (item.onSale)
+                              TextButton(
                                 onPressed: () => _offline(item),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  minimumSize: const Size(0, 30),
+                                  foregroundColor: AppColors.price,
+                                ),
                                 child: const Text('下架',
                                     style: TextStyle(fontSize: 12.5)),
                               )
-                            : const TagChip(text: '已下架'),
+                            else if (!item.onSale && item.statusText != '已下架')
+                              TagChip(text: item.statusText.isEmpty ? '已售出' : item.statusText),
+                          ],
+                        ),
                       );
                     },
                   ),

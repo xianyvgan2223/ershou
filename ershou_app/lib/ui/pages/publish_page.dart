@@ -15,7 +15,12 @@ import '../widgets/net_image.dart';
 ///
 /// 排版原则：能一行的不拆两行，校验错误就地显示，底部固定提交栏。
 class PublishPage extends ConsumerStatefulWidget {
-  const PublishPage({super.key});
+  const PublishPage({super.key, this.editing});
+
+  /// 传入商品即为编辑模式（表单预填、提交走 PUT /items/{id}）
+  final Item? editing;
+
+  bool get isEditing => editing != null;
 
   @override
   ConsumerState<PublishPage> createState() => _PublishPageState();
@@ -52,9 +57,28 @@ class _PublishPageState extends ConsumerState<PublishPage> {
   @override
   void initState() {
     super.initState();
+    _fillFromEditing();
     WidgetsBinding.instance.addPostFrameCallback((_) => _preload());
     _title.addListener(_onFieldChanged);
     _price.addListener(_onFieldChanged);
+  }
+
+  /// 编辑模式：把原商品的数据填进表单
+  void _fillFromEditing() {
+    final item = widget.editing;
+    if (item == null) return;
+    _title.text = item.title;
+    _desc.text = item.description;
+    _price.text = item.price == 0 ? '' : item.price.toString();
+    _originalPrice.text =
+        item.originalPrice == null ? '' : item.originalPrice!.toString();
+    _stock.text = item.stock.toString();
+    _conditionLevel = item.conditionLevel ?? 2;
+    _negotiable = item.negotiable == 1;
+    _unique = item.isUnique == 1;
+    _images.addAll(item.images);
+    _categoryId = item.categoryId;
+    _pointId = item.preferPointId;
   }
 
   void _onFieldChanged() {
@@ -116,6 +140,15 @@ class _PublishPageState extends ConsumerState<PublishPage> {
     }
   }
 
+  /// 图片列表是否与原商品一致（顺序也要一致，第一张是封面）
+  bool _sameImages(List<String> old) {
+    if (old.length != _images.length) return false;
+    for (var i = 0; i < old.length; i++) {
+      if (old[i] != _images[i]) return false;
+    }
+    return true;
+  }
+
   String? _validate() {
     final title = _title.text.trim();
     if (title.isEmpty) return '先写个标题，买家第一眼看的就是它';
@@ -142,25 +175,59 @@ class _PublishPageState extends ConsumerState<PublishPage> {
       _submitting = true;
     });
     try {
-      final result = await ref.read(itemWriteRepositoryProvider).publish(
-            title: _title.text.trim(),
-            description: _desc.text.trim(),
-            categoryId: _categoryId!,
-            price: double.parse(_price.text.trim()),
-            originalPrice: double.tryParse(_originalPrice.text.trim()),
-            conditionLevel: _conditionLevel,
-            negotiable: _negotiable ? 1 : 0,
-            stock: _unique ? 1 : (int.tryParse(_stock.text.trim()) ?? 1),
-            isUnique: _unique ? 1 : 0,
-            images: _images,
-            preferPointId: _pointId,
-          );
+      final repo = ref.read(itemWriteRepositoryProvider);
+      final title = _title.text.trim();
+      final description = _desc.text.trim();
+      final price = double.parse(_price.text.trim());
+      final originalPrice = double.tryParse(_originalPrice.text.trim());
+      final stock = _unique ? 1 : (int.tryParse(_stock.text.trim()) ?? 1);
+      final negotiable = _negotiable ? 1 : 0;
+      final isUnique = _unique ? 1 : 0;
+
+      final Map<String, dynamic> result;
+      if (widget.isEditing) {
+        // 编辑：只把跟原值不同的字段发出去，避免误覆盖
+        final old = widget.editing!;
+        result = await repo.update(
+          old.id,
+          title: title == old.title ? null : title,
+          description: description == old.description ? null : description,
+          categoryId: _categoryId == old.categoryId ? null : _categoryId,
+          conditionLevel:
+              _conditionLevel == old.conditionLevel ? null : _conditionLevel,
+          price: price == old.price ? null : price,
+          originalPrice:
+              originalPrice == old.originalPrice ? null : originalPrice,
+          negotiable: negotiable == old.negotiable ? null : negotiable,
+          stock: stock == old.stock ? null : stock,
+          isUnique: isUnique == old.isUnique ? null : isUnique,
+          images: _sameImages(old.images) ? null : _images,
+          preferPointId:
+              _pointId == old.preferPointId ? null : _pointId,
+        );
+      } else {
+        result = await repo.publish(
+          title: title,
+          description: description,
+          categoryId: _categoryId!,
+          price: price,
+          originalPrice: originalPrice,
+          conditionLevel: _conditionLevel,
+          negotiable: negotiable,
+          stock: stock,
+          isUnique: isUnique,
+          images: _images,
+          preferPointId: _pointId,
+        );
+      }
       if (!mounted) return;
       final statusText = (result['statusText'] ?? '').toString();
       final needReview = statusText.contains('审核');
       showToast(
         context,
-        needReview ? '已提交，命中可疑词转人工审核' : '发布成功：' + statusText,
+        widget.isEditing
+            ? (needReview ? '已保存，改动需人工复审' : '已保存')
+            : (needReview ? '已提交，命中可疑词转人工审核' : '发布成功：' + statusText),
       );
       Navigator.of(context).pop(true);
     } on ApiException catch (e) {
@@ -186,7 +253,7 @@ class _PublishPageState extends ConsumerState<PublishPage> {
       child: Scaffold(
         backgroundColor: AppColors.bg,
         appBar: AppBar(
-          title: const Text('发布闲置'),
+          title: Text(widget.isEditing ? '编辑商品' : '发布闲置'),
           actions: [
             if (_title.text.isNotEmpty || _images.isNotEmpty)
               TextButton(
@@ -712,7 +779,9 @@ class _PublishPageState extends ConsumerState<PublishPage> {
                         color: Colors.white,
                       ),
                     )
-                  : Text(_uploading ? '图片上传中…' : '发布'),
+                  : Text(_uploading
+                      ? '图片上传中…'
+                      : (widget.isEditing ? '保存修改' : '发布')),
             ),
           ),
         ],

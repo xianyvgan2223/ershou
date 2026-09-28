@@ -484,6 +484,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
 
   Widget _bottomBar(Item item) {
     final onSale = item.onSale;
+    // 不能交易时按钮文案取后端下发的真实状态：已下架 ≠ 已售出
+    final closedText = item.statusText.isEmpty ? '不可交易' : item.statusText;
     return Container(
       padding: EdgeInsets.only(
         left: 12,
@@ -506,7 +508,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
           _actionIcon(
             icon: Icons.chat_bubble_outline,
             label: '私聊',
-            onTap: _openChat,
+            color: onSale ? AppColors.inkSoft : AppColors.inkFaint,
+            onTap: onSale ? _openChat : () => showToast(context, '商品' + closedText + '，不能再聊了'),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -515,7 +518,7 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
               style: FilledButton.styleFrom(
                 backgroundColor: onSale ? AppColors.brand : AppColors.inkFaint,
               ),
-              child: Text(onSale ? '约面交' : '已售出'),
+              child: Text(onSale ? '约面交' : closedText),
             ),
           ),
         ],

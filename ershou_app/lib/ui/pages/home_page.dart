@@ -5,6 +5,7 @@ import '../../core/providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/item_card.dart';
+import 'favorites_page.dart';
 import 'item_detail_page.dart';
 
 /// 首页：搜索 + 分类 + 排序 + 双列瀑布流。
@@ -149,10 +150,24 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            state.total.toString(),
-            style: const TextStyle(fontSize: 12, color: AppColors.inkFaint),
+          const SizedBox(width: 6),
+          // 收藏入口：放在顶栏右侧，比藏进「我的」里少点两次
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const FavoritesPage()),
+            ),
+            child: Container(
+              height: 36,
+              width: 36,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.favorite_border,
+                  size: 17, color: AppColors.price),
+            ),
           ),
         ],
       ),

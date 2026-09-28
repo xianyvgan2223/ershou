@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.Result;
 import com.ershou.campus.module.item.dto.ItemPublishDTO;
+import com.ershou.campus.module.item.dto.ItemUpdateDTO;
 import com.ershou.campus.module.item.dto.ItemQueryDTO;
 import com.ershou.campus.module.item.service.ItemService;
 import com.ershou.campus.module.item.vo.ItemVO;
@@ -48,6 +49,14 @@ public class ItemController {
     public Result<Map<String, Object>> publish(@Valid @RequestBody ItemPublishDTO dto) {
         StpUtil.checkLogin();
         return Result.ok(itemService.publish(dto, StpUtil.getLoginIdAsLong()));
+    }
+
+    @Operation(summary = "编辑商品（标题 / 价格 / 描述 / 图片等，只提交改动的字段）")
+    @PutMapping("/{id}")
+    public Result<Map<String, Object>> update(@PathVariable Long id,
+                                              @Valid @RequestBody ItemUpdateDTO dto) {
+        StpUtil.checkLogin();
+        return Result.ok(itemService.update(id, dto, StpUtil.getLoginIdAsLong()));
     }
 
     @Operation(summary = "下架商品")
