@@ -105,8 +105,14 @@ void main() {
     expect(detail?.id, first.id);
     if (first.coverUrl.isNotEmpty) {
       final url = repo.imageUrl(first.coverUrl);
-      expect(url.contains('127.0.0.1:9010'), isFalse,
-          reason: 'MinIO 地址必须被重写到后端地址，否则手机加载不出图');
+      // 这里客户端配的就是 127.0.0.1，所以只校验「端口不被改写」这条回归：
+      // 换成真实 IP 的场景在 widget_test 的纯单元测试里覆盖。
+      expect(url.contains(':9010/'), isTrue,
+          reason: '图片端口被改写丢了，实际请求会打到后端 8080 拿不到图');
+      expect(url.startsWith('http'), isTrue);
+      // 端口必须保持 MinIO 的 9010：后端 8080 不提供图片，只会返回 90001 JSON
+      expect(url.contains(':9010/'), isTrue,
+          reason: '图片端口被改写丢了，实际请求会打到后端 8080 拿不到图');
     }
   });
 }

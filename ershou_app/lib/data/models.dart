@@ -74,6 +74,7 @@ class Item {
     this.categoryName = '',
     this.campusId,
     this.preferPointName = '',
+    this.preferPointGuide = '',
     this.status = 0,
     this.statusText = '',
     this.viewCount = 0,
@@ -97,6 +98,7 @@ class Item {
   final String categoryName;
   final int? campusId;
   final String preferPointName;
+  final String preferPointGuide;
   final int status;
   final String statusText;
   final int viewCount;
@@ -106,7 +108,8 @@ class Item {
   final Seller? seller;
   final String? highlightTitle;
 
-  bool get onSale => status == 1;
+  /// 后端 status=2 且 statusText="在售"（已用真实接口核对）；用文案判断最稳，避免猜错枚举。
+  bool get onSale => statusText == '在售' || (statusText.isEmpty && status == 2);
 
   factory Item.fromJson(Map<String, dynamic> json) => Item(
         id: (json['id'] as num?)?.toInt() ?? 0,
@@ -125,6 +128,7 @@ class Item {
         categoryName: (json['categoryName'] as String?) ?? '',
         campusId: (json['campusId'] as num?)?.toInt(),
         preferPointName: (json['preferPointName'] as String?) ?? '',
+        preferPointGuide: (json['preferPointGuide'] as String?) ?? '',
         status: (json['status'] as num?)?.toInt() ?? 0,
         statusText: (json['statusText'] as String?) ?? '',
         viewCount: (json['viewCount'] as num?)?.toInt() ?? 0,

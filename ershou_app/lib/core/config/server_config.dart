@@ -49,13 +49,18 @@ class ServerConfig {
     if (value.startsWith('/')) return origin + value;
     final uri = Uri.tryParse(value);
     if (uri == null || !uri.hasScheme) return origin + '/' + value;
-    const directHosts = {'minio', 'localhost', '127.0.0.1'};
-    final isBackendHost = uri.host == host.trim() && uri.port == port;
-    if (isBackendHost || directHosts.contains(uri.host)) {
-      final path = uri.path.isEmpty ? '/' : uri.path;
-      return origin + path + (uri.hasQuery ? '?' + uri.query : '');
-    }
-    return value;
+    // 只换主机名、保留端口：图片在 MinIO(9010)，后端 8080 只提供 API。
+    // 之前把端口一起改成 8080，导致每个图片请求都拿到 {"code":90001} 的 JSON。
+    const localHosts = {'minio', 'localhost', '127.0.0.1', '0.0.0.0'};
+    final isBackendHost = uri.host == host.trim();
+    if (!isBackendHost && !localHosts.contains(uri.host)) return value;
+    return Uri(
+      scheme: uri.scheme,
+      host: host.trim(),
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+      query: uri.hasQuery ? uri.query : null,
+    ).toString();
   }
 
   ServerConfig copyWith({

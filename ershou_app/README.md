@@ -103,6 +103,29 @@ flutter test test/lan_probe_test.dart   # 集成测试：需要后端已启动�
 统一响应体拆包、商品列表/详情解析 + 图片地址重写。
 连不上 127.0.0.1 的环境（沙箱、防火墙）会自动 skip 而不是失败。
 
+## 两个必须记住的坑（都已修）
+
+### 1. 图片在 MinIO 的 9010，不在后端的 8080
+
+后端 `public-base-url` 是 `http://127.0.0.1:9010/ershou`，接口在 8080。
+`ServerConfig.resolveAssetUrl()` 重写图片地址时**只换主机名、必须保留端口**：
+
+```dart
+// 配 host=192.168.17.112（8080 是 API）
+resolveAssetUrl('http://127.0.0.1:9010/ershou/a.jpg')
+// => http://192.168.17.112:9010/ershou/a.jpg   ✅
+// 曾经错误地变成 http://192.168.17.112:8080/ershou/a.jpg
+//    8080 上这个路径返回 {"code":90001} 的 JSON，图片全裂
+```
+
+实测对照：`8080/ershou/x.jpg` → `application/json` 92B；`9010/ershou/x.jpg` → `image/jpeg` 279910B。
+回归测试锁在 `test/widget_test.dart`。
+
+### 2. 商品卡片高度溢出（BOTTOM OVERFLOWED BY n PIXELS）
+
+1:1 封面 + 两行标题 + 价格行 + 卖家行 ≈ 273px，而 2 列网格在 720 宽屏上按比例只给 260px。
+现在 `childAspectRatio: 0.58` 并压缩了内边距/行高，真机实测不再溢出。
+
 ## 后端配套改动
 
 - `common/discovery/LanDiscoveryResponder.java`：UDP 48899 应答，实现「一键连接」的广播发现。

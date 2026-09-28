@@ -5,6 +5,7 @@ import 'core/providers.dart';
 import 'ui/pages/connect_page.dart';
 import 'ui/pages/home_page.dart';
 import 'ui/pages/login_page.dart';
+import 'ui/theme/app_theme.dart';
 
 /// 全局导航 key：退出登录 / 连接失效时可以从任意位置回到连接页。
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -20,10 +21,7 @@ class ErshouApp extends ConsumerWidget {
       title: '校园二手',
       debugShowCheckedModeBanner: false,
       navigatorKey: appNavigatorKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light(),
       home: !auth.isLoggedIn
           ? (server == null ? const ConnectPage() : const LoginPage())
           : const HomePage(),
