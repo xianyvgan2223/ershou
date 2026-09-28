@@ -29,6 +29,22 @@
 
 **所有密码集中在根目录 `.env`（已 gitignore）**，`.env.example` 是模板。
 
+## 一·五、手机端（Flutter）局域网联调
+
+| 位置 | 说明 |
+| --- | --- |
+| `ershou_app/` | Flutter Android 客户端（详见 `ershou_app/README.md`） |
+| `scripts/lan-info.ps1` | 打印手机该连的 IP + 自测 8080，换网络后跑一下 |
+| `LanDiscoveryResponder` | 后端 UDP **48899** 应答，手机「一键扫描」靠它秒连（**需重启后端生效**） |
+
+```powershell
+# 手机端连不上时的排查顺序（校园网 IP 会变、可能开 AP 隔离）
+powershell -ExecutionPolicy Bypass -File .\scripts\lan-info.ps1
+```
+
+App 里提供三条连接路径：**一键扫描**（UDP 广播 → 网段扫描）、**手动输入 IP:8080**、**扫二维码**；
+冷启动会先探测上次用过的地址，能用就直接进登录页。
+
 ## 二、启动步骤
 
 ```powershell
