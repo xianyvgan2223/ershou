@@ -30,11 +30,20 @@ class ChatRepository {
     return env.data!;
   }
 
-  Future<List<ChatMessage>> messages(int sessionId, {int? beforeId, int size = 30}) async {
+  /// 历史消息。两个游标互斥：
+  ///  - beforeId：往前翻（越翻越旧）
+  ///  - afterId：断线补拉（只取比它新的，后端 v3.3 起支持）
+  Future<List<ChatMessage>> messages(
+    int sessionId, {
+    int? beforeId,
+    int? afterId,
+    int size = 30,
+  }) async {
     final env = await _api.envelope<List<ChatMessage>>(
       () => _api.dio.get<dynamic>('/chat/sessions/' + sessionId.toString() + '/messages',
           queryParameters: {
             if (beforeId != null) 'beforeId': beforeId,
+            if (afterId != null) 'afterId': afterId,
             'size': size,
           }),
       parse: (data) => (data as List)
@@ -58,6 +67,15 @@ class ChatRepository {
         'msgType': msgType,
         if (clientMsgId != null) 'clientMsgId': clientMsgId,
       }),
+      parse: (data) => ChatMessage.fromJson((data as Map).cast<String, dynamic>()),
+    );
+    return env.data!;
+  }
+
+  /// 撤回自己发的消息（后端限时 2 分钟，超时抛 70007）。
+  Future<ChatMessage> recall(int messageId) async {
+    final env = await _api.envelope<ChatMessage>(
+      () => _api.dio.post<dynamic>('/chat/messages/' + messageId.toString() + '/recall'),
       parse: (data) => ChatMessage.fromJson((data as Map).cast<String, dynamic>()),
     );
     return env.data!;

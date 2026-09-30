@@ -110,19 +110,33 @@ class ChatMessage {
 
   bool get isImage => msgType == 2;
 
-  ChatMessage copyWith({int? id, String? localStatus}) => ChatMessage(
+  ChatMessage copyWith({
+    int? id,
+    int? msgType,
+    String? content,
+    bool? mine,
+    bool? recalled,
+    String? riskWarning,
+    String? clientMsgId,
+    String? createdAt,
+    String? localStatus,
+  }) =>
+      ChatMessage(
         id: id ?? this.id,
         sessionId: sessionId,
         senderId: senderId,
-        msgType: msgType,
-        content: content,
-        mine: mine,
-        recalled: recalled,
-        riskWarning: riskWarning,
-        clientMsgId: clientMsgId,
-        createdAt: createdAt,
+        msgType: msgType ?? this.msgType,
+        content: content ?? this.content,
+        mine: mine ?? this.mine,
+        recalled: recalled ?? this.recalled,
+        riskWarning: riskWarning ?? this.riskWarning,
+        clientMsgId: clientMsgId ?? this.clientMsgId,
+        createdAt: createdAt ?? this.createdAt,
         localStatus: localStatus ?? this.localStatus,
       );
+
+  /// 服务端消息（有 id）才可能被撤回、才算已落库。
+  bool get fromServer => id > 0;
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
         id: _intOf(j['id']),

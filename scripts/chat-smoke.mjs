@@ -111,6 +111,16 @@ const run = async () => {
   const self = await api('/chat/sessions', { method: 'POST', token: seller.token, body: { itemId: target.id } });
   check('卖家和自己私聊被拒', self.code, 70001);
 
+  // 基线快照：冒烟会在同一个开发库上反复跑，断言必须用"增量"而不是绝对值
+  const baselineHistory = await api(`/chat/sessions/${sessionId}/messages?size=50`, { token: buyer.token });
+  const baseline = {
+    maxId: baselineHistory.data.length ? baselineHistory.data[baselineHistory.data.length - 1].id : 0,
+    sellerSessionUnread:
+      (await api('/chat/sessions', { token: seller.token })).data.find((x) => x.id === sessionId)?.unread ?? 0,
+    sellerTotal: (await api('/chat/unread', { token: seller.token })).data.total ?? 0,
+    buyerTotal: (await api('/chat/unread', { token: buyer.token })).data.total ?? 0,
+  };
+
   console.log('=== 5. 买家 REST 发消息 → 卖家 WS 实时收到 ===');
   const m1 = await api('/chat/messages', { method: 'POST', token: buyer.token, body: { sessionId, content: '同学你好，这个还在吗？' } });
   check('REST 发送成功', m1.code, 0);
@@ -126,13 +136,14 @@ const run = async () => {
   check('ACK 内容正确', ack.data.content, '支持当面验货吗');
   check('ACK mine=true', ack.data.mine, true);
 
-  console.log('=== 7. 未读数（卖家 2 条未读）===');
+  console.log('=== 7. 未读数（卖家新增 2 条）===');
   const sellerSessions = await api('/chat/sessions', { token: seller.token });
-  check('卖家会话未读=2', sellerSessions.data[0].unread, 2);
+  const sellerSessionUnread = sellerSessions.data.find((x) => x.id === sessionId)?.unread ?? 0;
+  check('卖家本会话未读=基线+2', sellerSessionUnread, baseline.sellerSessionUnread + 2);
   const sellerUnread = await api('/chat/unread', { token: seller.token });
-  check('未读汇总 total=2', sellerUnread.data.total, 2);
+  check('未读汇总=基线+2', sellerUnread.data.total, baseline.sellerTotal + 2);
   const buyerUnread = await api('/chat/unread', { token: buyer.token });
-  check('买家未读=0', buyerUnread.data.total, 0);
+  check('买家未读没变（自己发的不计未读）', buyerUnread.data.total, baseline.buyerTotal);
 
   console.log('=== 8. 卖家标记已读 → 买家 WS 收到 read 事件 ===');
   const readResp = await api(`/chat/sessions/${sessionId}/read`, { method: 'POST', token: seller.token });
@@ -140,7 +151,10 @@ const run = async () => {
   const readFrame = await b.next((f) => f.type === 'read');
   check('买家收到已读回执', readFrame.data.sessionId, sessionId);
   const afterRead = await api('/chat/unread', { token: seller.token });
-  check('已读后未读=0', afterRead.data.total, 0);
+  const sellerSessionAfterRead =
+    (await api('/chat/sessions', { token: seller.token })).data.find((x) => x.id === sessionId)?.unread ?? 0;
+  check('已读后本会话未读=0', sellerSessionAfterRead, 0);
+  check('已读后未读汇总=基线-本会话基线', afterRead.data.total, baseline.sellerTotal - baseline.sellerSessionUnread);
 
   console.log('=== 9. 聊天风控：可疑词弱提醒放行 / 高危词拦截留痕 ===');
   const review = await api('/chat/messages', { method: 'POST', token: buyer.token, body: { sessionId, content: '要不加微信转账吧' } });
@@ -155,13 +169,38 @@ const run = async () => {
   console.log('=== 10. 历史消息（游标 + 拦截消息只对发送方可见）===');
   const buyerHistory = await api(`/chat/sessions/${sessionId}/messages?size=50`, { token: buyer.token });
   const sellerHistory = await api(`/chat/sessions/${sessionId}/messages?size=50`, { token: seller.token });
-  check('买家能看到自己发的 4 条（含被拦的）', buyerHistory.data.length, 4);
-  check('卖家只看到 3 条（拦截的不投递）', sellerHistory.data.length, 3);
+  // 用基线之后的增量断言：同一个开发库反复跑也不会因为历史消息越积越多而失败
+  const newBuyer = buyerHistory.data.filter((m) => m.id > baseline.maxId);
+  const newSeller = sellerHistory.data.filter((m) => m.id > baseline.maxId);
+  check('买家新增 4 条（含被拦的）', newBuyer.length, 4);
+  check('卖家新增 3 条（拦截的不投递）', newSeller.length, 3);
   checkTrue('买家历史里含被拦截消息', buyerHistory.data.some((m) => m.riskLevel === 3));
   checkTrue('卖家历史里没有被拦截消息', !sellerHistory.data.some((m) => m.riskLevel === 3));
-  check('历史按时间正序', buyerHistory.data[0].content, '同学你好，这个还在吗？');
-  const page2 = await api(`/chat/sessions/${sessionId}/messages?beforeId=${buyerHistory.data[1].id}&size=50`, { token: buyer.token });
-  check('游标翻页只剩第 1 条', page2.data.length, 1);
+  checkTrue('历史按 id 正序',
+    buyerHistory.data.every((m, i, arr) => i === 0 || arr[i - 1].id < m.id));
+  const newestBuyer = buyerHistory.data[buyerHistory.data.length - 1];
+  const page2 = await api(`/chat/sessions/${sessionId}/messages?beforeId=${newestBuyer.id}&size=50`, { token: buyer.token });
+  checkTrue('beforeId 只返回更早的消息（不含自身）',
+    page2.data.length > 0 && page2.data.every((m) => m.id < newestBuyer.id), JSON.stringify(page2.data?.length));
+
+  console.log('=== 10b. afterId 增量补拉 + lastMsgId（v3.3 新增）===');
+  // 手机端重连后靠 afterId 只拉断线期间的新消息；lastMsgId 让它先判断"有没有新消息"。
+  // 注意：老后端不认这两个参数，本节会失败 —— 跑之前先重启后端。
+  const fresh = await api('/chat/messages', {
+    method: 'POST', token: buyer.token, body: { sessionId, content: '游标校验（可忽略）' },
+  });
+  check('发送游标校验消息', fresh.code, 0);
+  const msgBase = '/chat/sessions/' + sessionId + '/messages?size=50';
+  const afterOne = await api(msgBase + '&afterId=' + (fresh.data.id - 1), { token: buyer.token });
+  check('afterId 只返回更新的消息', afterOne.data?.length, 1);
+  check('afterId 返回最新那条', afterOne.data?.[0]?.id, fresh.data.id);
+  const afterNone = await api(msgBase + '&afterId=' + fresh.data.id, { token: buyer.token });
+  check('没有新消息时 afterId 返回空', afterNone.data?.length, 0);
+  const bothCursors = await api(
+    msgBase + '&afterId=1&beforeId=' + fresh.data.id, { token: buyer.token });
+  checkTrue('afterId 与 beforeId 互斥被拒', bothCursors.code !== 0, JSON.stringify(bothCursors));
+  const sessionRow = (await api('/chat/sessions', { token: buyer.token })).data.find((x) => x.id === sessionId);
+  check('会话带 lastMsgId', sessionRow.lastMsgId, fresh.data.id);
 
   console.log('=== 11. 越权与参数校验 ===');
   const stranger = await api(`/chat/sessions/${sessionId}/messages`, { token: 'invalid-token' });

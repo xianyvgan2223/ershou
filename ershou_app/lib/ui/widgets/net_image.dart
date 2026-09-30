@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../core/storage/image_cache.dart';
 import '../theme/app_theme.dart';
 
 /// 统一处理图片地址：后端返回的 MinIO 绝对地址会重写到当前服务器。
@@ -25,6 +26,12 @@ class NetImage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resolved = ref.watch(itemRepositoryProvider).imageUrl(url);
+    // 列表缩略图按显示尺寸解码：一张 3000px 的原图直接进内存 = 36MB，
+    // 缩到实际像素宽后同样的列表内存占用能降一个数量级。
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final decodeWidth = (width == null || width! <= 0)
+        ? null
+        : (width! * dpr).round().clamp(1, 1600);
     Widget fallback(IconData icon) => Container(
           width: width,
           height: height,
@@ -39,6 +46,8 @@ class NetImage extends ConsumerWidget {
     } else {
       child = CachedNetworkImage(
         imageUrl: resolved,
+        cacheManager: ErshouImageCache.instance,
+        memCacheWidth: decodeWidth,
         width: width,
         height: height,
         fit: fit,
@@ -92,6 +101,8 @@ class Avatar extends ConsumerWidget {
     return ClipOval(
       child: CachedNetworkImage(
         imageUrl: resolved,
+        cacheManager: ErshouImageCache.instance,
+        memCacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(1, 512),
         width: size,
         height: size,
         fit: BoxFit.cover,

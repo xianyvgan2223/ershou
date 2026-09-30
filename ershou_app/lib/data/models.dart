@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// 与后端 VO 对齐的数据模型（只声明 App 用得上的字段）。
 class PageResult<T> {
   const PageResult({
@@ -202,6 +204,8 @@ class Category {
         name: (json['name'] as String?) ?? '',
         sort: (json['sort'] as num?)?.toInt() ?? 0,
       );
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'sort': sort};
 }
 
 class AppUser {
@@ -248,6 +252,35 @@ class AppUser {
         roleFlags: (json['roleFlags'] as num?)?.toInt() ?? 0,
         isAdmin: (json['isAdmin'] as bool?) ?? false,
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'nickname': nickname,
+        'avatar': avatar,
+        'phone': phone,
+        'schoolName': schoolName,
+        'campusName': campusName,
+        'creditScore': creditScore,
+        'shopName': shopName,
+        'publishLimit': publishLimit,
+        'roleFlags': roleFlags,
+        'isAdmin': isAdmin,
+      };
+
+  /// 离线快照：冷启动先渲染昵称/头像，避免首页顶部先闪"同学"再跳真名。
+  String encode() => jsonEncode(toJson());
+
+  static AppUser? decode(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final user = AppUser.fromJson(decoded.cast<String, dynamic>());
+      return user.id == 0 ? null : user;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class LoginResult {

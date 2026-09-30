@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../core/storage/image_cache.dart';
 import '../../core/utils/formatters.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -64,6 +65,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               _menuTile(Icons.dns_outlined, '服务器地址',
                   subtitle: ref.watch(activeServerProvider)?.origin ?? '未配置',
                   onTap: () => _push(const ConnectPage())),
+              _menuTile(Icons.cleaning_services_outlined, '清理图片缓存',
+                  onTap: _clearImageCache),
               _menuTile(Icons.swap_horiz, '切换账号', onTap: _logout),
               _menuTile(Icons.logout, '退出登录', onTap: _logout),
             ]),
@@ -84,6 +87,24 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => page))
         .then((_) => _refresh());
+  }
+
+  /// 图片缓存上限是 800 个文件（见 core/storage/image_cache.dart），
+  /// 给一个手动入口，换设备/空间紧张时能立刻回收。
+  Future<void> _clearImageCache() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: const Text('清理已缓存的商品图片？下次浏览会重新下载。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清理')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await ErshouImageCache.clear();
+    if (mounted) showToast(context, '图片缓存已清理');
   }
 
   Future<void> _logout() async {

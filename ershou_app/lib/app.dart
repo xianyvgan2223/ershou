@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/app_lifecycle.dart';
 import 'core/providers.dart';
 import 'ui/pages/connect_page.dart';
 import 'ui/pages/login_page.dart';
@@ -34,9 +35,12 @@ class ErshouApp extends ConsumerWidget {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: !auth.isLoggedIn
-          ? (server == null ? const ConnectPage() : const LoginPage())
-          : const ShellPage(),
+      // ChatConnectionKeeper：全局长连接保活 + 前台重连（登录前后都挂）
+      home: ChatConnectionKeeper(
+        child: !auth.isLoggedIn
+            ? (server == null ? const ConnectPage() : const LoginPage())
+            : const ShellPage(),
+      ),
     );
   }
 }

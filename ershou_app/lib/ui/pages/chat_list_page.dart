@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../core/storage/chat_cache.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/models2.dart';
 import '../theme/app_theme.dart';
@@ -20,6 +23,7 @@ class ChatListPageState extends ConsumerState<ChatListPage> {
   List<ChatSession> _sessions = const [];
   bool _loading = true;
   String? _error;
+  Timer? _reloadDebounce;
 
   @override
   void initState() {
@@ -27,38 +31,81 @@ class ChatListPageState extends ConsumerState<ChatListPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => load());
   }
 
-  Future<void> load() async {
-    if (!mounted) return;
-    setState(() {
-      _loading = true;
-      _error = null;
+  @override
+  void dispose() {
+    _reloadDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// 新消息/撤回/重连都会 bump 版本号：合并成一次刷新，别每条消息都打一遍接口。
+  void _scheduleReload() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) unawaited(load(silent: true));
     });
+  }
+
+  /// 先用本地镜像出列表（冷启动秒开），再拉服务端覆盖。
+  Future<void> load({bool silent = false}) async {
+    if (!mounted) return;
+    if (!silent && _sessions.isEmpty) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    await _loadFromCache();
     try {
       final list = await ref.read(chatRepositoryProvider).sessions();
       if (!mounted) return;
       setState(() {
-        _sessions = list;
+        _sessions = mergeSessions(local: _sessions, incoming: list);
         _loading = false;
+        _error = null;
       });
+      final cache = ref.read(chatCacheProvider);
+      final scope = ref.read(chatScopeProvider);
+      if (cache != null && scope.isNotEmpty) {
+        unawaited(cache.saveSessions(scope, list));
+      }
       await ref.read(unreadProvider.notifier).refresh();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _loading = false;
+        if (_sessions.isEmpty) _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _loadFromCache() async {
+    if (_sessions.isNotEmpty) return;
+    final cache = ref.read(chatCacheProvider);
+    final scope = ref.read(chatScopeProvider);
+    if (cache == null || scope.isEmpty) return;
+    try {
+      final cached = await cache.sessions(scope);
+      if (!mounted || cached.isEmpty) return;
+      setState(() {
+        _sessions = cached;
         _loading = false;
       });
+    } catch (_) {
+      // 缓存读失败不影响网络加载
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 聊天长连接推来的变化 → 列表自动刷新（以前要手动下拉或退出重进）
+    ref.listen(chatRevisionProvider, (_, __) => _scheduleReload());
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: const Text('消息'),
         actions: [
           IconButton(
-            onPressed: load,
+            onPressed: () => load(),
             icon: const Icon(Icons.refresh, size: 20),
             tooltip: '刷新',
           ),
@@ -70,10 +117,10 @@ class ChatListPageState extends ConsumerState<ChatListPage> {
               ? EmptyState(
                   icon: Icons.forum_outlined,
                   message: _error ?? '还没有会话\n去商品详情页点「私聊」就能开始',
-                  onRetry: load,
+                  onRetry: () => load(),
                 )
               : RefreshIndicator(
-                  onRefresh: load,
+                  onRefresh: () => load(silent: true),
                   child: ListView.separated(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     itemCount: _sessions.length,
@@ -97,7 +144,7 @@ class ChatListPageState extends ConsumerState<ChatListPage> {
           await Navigator.of(context).push(
             MaterialPageRoute<void>(builder: (_) => ChatPage(session: s)),
           );
-          if (mounted) load();
+          if (mounted) load(silent: true);
         },
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),

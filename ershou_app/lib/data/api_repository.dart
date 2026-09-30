@@ -57,7 +57,29 @@ class ItemRepository {
     int? categoryId,
     String? sort,
   }) async {
-    final env = await _api.envelope<PageResult<Item>>(
+    final raw = await pageRaw(
+      pageNum: pageNum,
+      pageSize: pageSize,
+      keyword: keyword,
+      categoryId: categoryId,
+      sort: sort,
+    );
+    if (raw == null) {
+      return const PageResult<Item>(total: 0, pageNum: 1, pageSize: 20, records: []);
+    }
+    return PageResult.fromJson<Item>(raw, Item.fromJson);
+  }
+
+  /// 列表原始 JSON：首页第一页要落本地缓存（冷启动先出内容再刷新），
+  /// 所以这里把没解析过的 Map 交出去。
+  Future<Map<String, dynamic>?> pageRaw({
+    int pageNum = 1,
+    int pageSize = 20,
+    String? keyword,
+    int? categoryId,
+    String? sort,
+  }) async {
+    final env = await _api.envelope<Map<String, dynamic>>(
       () => _api.dio.get<dynamic>('/items', queryParameters: {
         'pageNum': pageNum,
         'pageSize': pageSize,
@@ -65,18 +87,22 @@ class ItemRepository {
         if (categoryId != null) 'categoryId': categoryId,
         if (sort != null && sort.isNotEmpty) 'sort': sort,
       }),
-      parse: (data) => PageResult.fromJson<Item>(
-        (data as Map).cast<String, dynamic>(),
-        Item.fromJson,
-      ),
+      parse: (data) => (data as Map).cast<String, dynamic>(),
     );
-    return env.data ?? const PageResult<Item>(total: 0, pageNum: 1, pageSize: 20, records: []);
+    return env.data;
   }
 
   Future<Item?> detail(int id) async {
-    final env = await _api.envelope<Item>(
+    final raw = await detailRaw(id);
+    return raw == null ? null : Item.fromJson(raw);
+  }
+
+  /// 详情原始 JSON：详情页先渲染本地缓存（stale-while-revalidate），
+  /// 所以这里要把没解析过的 Map 交出去。
+  Future<Map<String, dynamic>?> detailRaw(int id) async {
+    final env = await _api.envelope<Map<String, dynamic>>(
       () => _api.dio.get<dynamic>('/items/' + id.toString()),
-      parse: (data) => Item.fromJson((data as Map).cast<String, dynamic>()),
+      parse: (data) => (data as Map).cast<String, dynamic>(),
     );
     return env.data;
   }

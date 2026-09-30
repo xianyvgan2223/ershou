@@ -40,8 +40,14 @@ dependencies:
   shared_preferences: ^2.5.5
   mobile_scanner: ^7.4.2
   cached_network_image: ^4.0.2
+  # 自定义图片缓存配置（上限/过期/清理入口）需要直接用它的 API
+  flutter_cache_manager: ^3.4.5
   image_picker: ^1.2.3
   intl: ^0.20.2
+  # 本地缓存（聊天消息/会话镜像）：sqflite 与 path_provider 本来就在
+  # flutter_cache_manager 的传递依赖里，提成直接依赖不需要额外下载。
+  sqflite: ^2.4.4
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

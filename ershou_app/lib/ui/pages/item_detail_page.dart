@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,31 +37,61 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     _load();
   }
 
+  String get _cacheKey => 'item.' + widget.itemId.toString();
+
+  /// 先本地后网络（stale-while-revalidate）：
+  /// 详情页是最高频入口，每次进来都转一次圈太亏；缓存先渲染，网络回来再覆盖。
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final item = await ref.read(itemRepositoryProvider).detail(widget.itemId);
+    if (_item == null) {
+      _loadFromCache();
       if (!mounted) return;
+      if (_item == null) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+      }
+    }
+    try {
+      final raw = await ref.read(itemRepositoryProvider).detailRaw(widget.itemId);
+      if (!mounted) return;
+      if (raw == null) throw ApiException(-3, '商品不存在或已下架');
+      final item = Item.fromJson(raw);
       setState(() {
         _item = item;
-        _favorited = item?.favorited ?? false;
+        _favorited = item.favorited;
         _loading = false;
+        _error = null;
       });
+      unawaited(ref.read(localStoreProvider).setJsonCache(_cacheKey, raw));
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
         _loading = false;
+        if (_item == null) _error = e.message;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _loading = false;
+        if (_item == null) _error = e.toString();
+      });
+    }
+  }
+
+  void _loadFromCache() {
+    final raw = ref.read(localStoreProvider).jsonCache(_cacheKey);
+    if (raw is! Map) return;
+    try {
+      final item = Item.fromJson(raw.cast<String, dynamic>());
+      if (item.id == 0) return;
+      setState(() {
+        _item = item;
+        _favorited = item.favorited;
         _loading = false;
       });
+    } catch (_) {
+      // 缓存坏了就当没有，网络请求照常
     }
   }
 

@@ -10,6 +10,8 @@ import java.time.LocalDateTime;
 public class ChatSessionVO {
 
     private Long id;
+    /** 最后一条消息 id：客户端据此判断"这个会话有没有新消息"，避免每次都全量拉消息 */
+    private Long lastMsgId;
     private Long peerId;
     private String peerName;
     private String peerAvatar;

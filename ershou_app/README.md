@@ -83,6 +83,8 @@ adb reverse tcp:8080 tcp:8080
 - 接口层：Sa-Token `Authorization: Bearer`、统一响应体拆包（`code != 0` 抛 `ApiException`）
 - **图片地址重写**：后端返回的 MinIO 绝对地址（`http://127.0.0.1:9010/ershou/...`）自动换成当前服务器地址
   —— 手机访问 127.0.0.1 会指向手机自己，这一步不做图片全裂
+- **私聊**：全局单例 WebSocket（30 秒心跳 / 半死连接重连 / 切后台回来重连）+ 本地消息镜像 + 撤回 + 已读回执 + 历史翻页 + 失败重发 + 草稿，详见下一节
+- **本地缓存**：聊天会话/消息（sqflite）、商品详情首屏、分类列表、用户快照、图片磁盘缓存（800 个文件 / 60 天，可在「我的」里清理）
 
 ## 目录
 
@@ -94,9 +96,16 @@ lib/
     config/server_config.dart           地址模型：origin / apiBase / 图片重写 / ws 地址
     config/server_config_service.dart   持久化 + 连通性探测
     discovery/lan_scanner.dart          一键连接：广播 → 网段扫描 → 结果流
-    network/api_client.dart             dio 封装：统一响应体、错误码、Bearer
-    storage/local_store.dart            token / 用户快照
-    providers.dart                      Riverpod providers、登录态、列表状态
+    network/api_client.dart             dio 封装：统一响应体、错误码、Bearer、10002 回调
+    network/chat_events.dart            WS 帧解析（{type,data} 信封）
+    network/chat_socket.dart            私聊长连接：心跳、退避重连、帧流
+    storage/local_store.dart            token / 用户快照 / 小对象 JSON 缓存
+    storage/chat_database.dart          聊天镜像库建表与迁移（可丢，失败即重建）
+    storage/chat_dao.dart               会话/消息读写 + 行映射
+    storage/chat_cache.dart             领域层：scope、合并规则（纯函数，有单测）
+    storage/image_cache.dart            图片磁盘缓存配置与清理
+    app_lifecycle.dart                  全局保活 + 回前台重连
+    providers.dart                      Riverpod providers、登录态、列表状态、聊天事件路由
   data/
     models.dart                   Item / Category / Seller / AppUser / PageResult
     api_repository.dart           AuthRepository / ItemRepository
@@ -107,6 +116,68 @@ lib/
     pages/item_detail_page.dart   商品详情
     widgets/net_image.dart        带地址重写的网络图片
 ```
+
+## 私聊链路：WebSocket 协议与本地缓存
+
+### 服务端帧是信封，不是裸消息
+
+所有推送统一是 `{"type":"...","data":{...}}`（后端 `ChatPushService.buildPayload`）：
+
+| type | data | 手机端动作 |
+| --- | --- | --- |
+| `ready` | `{userId, online, instanceId}` | 标记在线、刷未读、用 `afterId` 增量补拉断线期间的消息 |
+| `pong` | `{ts}` | 心跳存活 |
+| `message` | ChatMessageVO（接收方视角） | 写库 + 增量渲染 + 未读（人就在这个会话则直接标已读） |
+| `ack` | ChatMessageVO（带 `clientMsgId`） | 把"发送中"替换成服务端消息 |
+| `recall` | ChatMessageVO（`recalled=true`） | 覆盖成撤回态（原文不再留存） |
+| `read` | `{sessionId, readerId}` | 自己最后一条显示"已读" |
+| `read-ack` | `{sessionId}` | 可忽略（本地已乐观置零） |
+| `error` | `{clientMsgId, code, message}` | 标失败 + 弹后端文案（风控/限额/无权） |
+
+> 踩过的坑（v3.2 及以前）：手机端把整帧当消息体解析（读 `raw['id']`/`raw['sessionId']`），
+> 信封里没有这两个字段 → `id == 0` 被当成非法帧丢弃，`message/ack/recall` 一个都收不到；
+> 而"连上 WS 就停轮询"让这个 bug 表现为**显示"在线 · 实时接收"却收不到消息，必须退出重进**。
+> 现在协议解析被 `test/chat_protocol_test.dart` 锁死。
+
+### 连接策略（对齐 Web 端 `ershou-web/src/stores/chat.ts`）
+
+- **全局单例**：`chatSocketProvider`，登录后自动连、退出登录/换服务器自动断（以前是每个聊天页各建一条，退出即断）
+- **心跳 30 秒**：服务端在线状态是 90 秒 TTL（`ChatPushService.touch`），不 ping 的话你在对方列表里 90 秒后就变灰
+- **半死连接**：75 秒收不到任何帧就主动重连；退避 1/2/4/8 秒
+- **回前台重连**：`ChatConnectionKeeper`（`core/app_lifecycle.dart`）监听生命周期，resumed 时重连 + 校准未读
+- **轮询兜底**：判断条件从"没连上"改成"**没连上，或在线但 20 秒没收到帧**"，避免上面的坑复发
+- **会话列表实时**：新消息/撤回/重连会 bump `chatRevisionProvider`，列表 600ms 去抖后自动刷新（以前要下拉或退出重进）
+
+### 本地缓存（sqflite）
+
+- 库文件 `<App 私有目录>/ershou_chat.db`：纯缓存，随时可丢
+- 命名空间 `scope = <服务器 origin>|<用户 id>`：换服务器、切账号天然隔离，不串会话
+- 表：`chat_session`（列表首屏）、`chat_message`（消息镜像）、`chat_sync`（每会话最大消息 id，补拉用）
+- 消息主键：服务端消息 `s:<id>`、本地乐观消息 `c:<clientMsgId>` —— 收到 ack 就是一次主键覆盖，不靠时间猜
+- 合并规则（`mergeMessages`，纯函数 + 单测）：服务端窗口为准做 upsert；**本地没回包/发送失败的行保留**；
+  不能因为"服务端没返回"就删本地行（服务端会把被风控拦截的消息对接收方隐藏）
+- 读路径：进页面先渲染本地（秒开）→ 网络回来合并写回；断网时顶部提示"当前网络不可用，下面是本地缓存的消息"
+- 发送中超过 30 秒没回包 → 自动标"发送失败，点击重发"
+- 保留与清理：每会话留最近 300 条（`sending`/`failed` 永不裁）；退出登录、token 失效（10002）时清当前 scope
+- 单测说明：本机离线环境下 `sqlite3` 原生库需要联网下载，所以测试环境不跑真库 ——
+  DAO 只留极简 SQL，所有可测逻辑（帧解析、合并规则、scope）都抽成纯 Dart 函数（`test/chat_merge_test.dart`）
+
+### 后端配套（v3.3）
+
+- `GET /chat/sessions/{id}/messages` 增加 `afterId`：断线补拉只取比它新的（与 `beforeId` 互斥，同时传 PARAM_ERROR）。
+  手机端在收到 `ready` 帧（重连成功）时，用本地最大消息 id 调它；返回满一页或后端不认识这个参数时，回退全量刷新
+- `ChatSessionVO.lastMsgId`：客户端据此判断"这个会话有没有新消息"，不必每次都全量拉消息
+- 回归：`scripts/chat-smoke.mjs` 增加了 6 项断言覆盖 `afterId` / `lastMsgId`（旧后端会失败 5 项，属预期）
+
+### 真机验收清单
+
+1. 手机停在聊天页，Web 端发消息 → 1 秒内出现，顶部显示"在线 · 实时接收"
+2. 关掉电脑 WiFi 5 秒再恢复 → 状态回到在线，断线期间的消息自动补齐
+3. 飞行模式进聊天页 → 有缓存则直接出内容 + 离线提示；发消息 → "发送失败，点击重发"，点一下能重发
+4. 长按自己 2 分钟内的消息 → 撤回，两边同步变成"你撤回了一条消息"
+5. 滚到顶部 → 加载更早历史；对方进页面后自己最后一条显示"已读"
+6. 杀进程重进 → 会话列表与消息仍在；退出登录 → 缓存清空（换账号看不到上一个账号的会话）
+7. "我的 → 清理图片缓存" → 提示已清理，再逛商品图重新下载
 
 ## 日常改代码：热重载（重要）
 
@@ -228,10 +299,11 @@ resolveAssetUrl('http://127.0.0.1:9010/ershou/a.jpg')
 
 ## 接着做什么（按依赖顺序）
 
-1. **发布商品**：`POST /api/v1/items` + `POST /api/v1/files/upload`（multipart，字段 `file`，`biz=item`），image_picker 依赖已装
-2. **收藏 / 购物车 / 面交单**：`/api/v1/favorites`、`/api/v1/cart`、`/api/v1/meetup-orders`
-3. **私聊**：`ws://<host>:8080/ws/chat?token=<token>`（`ServerConfig.chatWs()` 已拼好），REST 兜底 `/api/v1/chat`
+1. ~~**发布商品**：`POST /api/v1/items` + `POST /api/v1/files/upload`~~ ✅ 已完成（含编辑：只提交改动字段）
+2. ~~**收藏 / 面交单**：`/api/v1/favorites`、`/api/v1/meetup-orders`~~ ✅ 已完成
+3. ~~**私聊**：`ws://<host>:8080/ws/chat?token=<token>`~~ ✅ 已完成（长连接 + 本地缓存，见「私聊链路」一节）
 4. **校内地图**：`/api/v1/map`，底图是 CRS.Simple 自定义图，手机端要么用 flutter_map，要么自绘 CustomPainter
+5. **待办**：离线自动重发队列（当前只做失败手动重发）、消息图片上传进度、推送（APNs/FCM）
 
 ## 已知注意点
 

@@ -1,5 +1,6 @@
 package com.ershou.campus.module.chat.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.ResultCode;
@@ -200,18 +201,30 @@ public class ChatService {
 
     // ------------------------------------------------------------ 消息
 
-    /** 历史消息：id 游标倒序取最近 N 条，返回时间正序 */
-    public List<ChatMessageVO> listMessages(Long userId, Long sessionId, Long beforeId, Integer size) {
+    /**
+     * 历史消息：id 游标，返回时间正序。
+     *
+     * <p>beforeId = 往前翻历史（越翻越旧）；afterId = 断线补拉（只取比它新的，
+     * 取最新 limit 条，一次就能追上最新进度）。两者互斥。
+     */
+    public List<ChatMessageVO> listMessages(Long userId, Long sessionId, Long beforeId, Long afterId, Integer size) {
         requireMember(sessionId, userId);
+        if (beforeId != null && afterId != null) {
+            throw new BizException(ResultCode.PARAM_ERROR, "beforeId 与 afterId 不能同时使用");
+        }
         int limit = size == null || size < 1 ? props.getHistorySize()
                 : Math.min(size, props.getMaxHistorySize());
-        List<ChatMessage> rows = messageMapper.selectList(Wrappers.<ChatMessage>lambdaQuery()
+        LambdaQueryWrapper<ChatMessage> query = Wrappers.<ChatMessage>lambdaQuery()
                 .eq(ChatMessage::getSessionId, sessionId)
-                .lt(beforeId != null, ChatMessage::getId, beforeId)
                 // 被风控拦截的消息只对发送方可见，接收方读不到
-                .and(w -> w.eq(ChatMessage::getBlocked, 0).or().eq(ChatMessage::getSenderId, userId))
-                .orderByDesc(ChatMessage::getId)
-                .last("LIMIT " + limit));
+                .and(w -> w.eq(ChatMessage::getBlocked, 0).or().eq(ChatMessage::getSenderId, userId));
+        if (afterId != null) {
+            query.gt(ChatMessage::getId, afterId);
+        } else {
+            query.lt(beforeId != null, ChatMessage::getId, beforeId);
+        }
+        List<ChatMessage> rows = messageMapper.selectList(
+                query.orderByDesc(ChatMessage::getId).last("LIMIT " + limit));
         List<ChatMessageVO> list = new ArrayList<>(rows.size());
         for (int i = rows.size() - 1; i >= 0; i--) {
             list.add(toMessageVO(rows.get(i), userId, null));
@@ -429,6 +442,7 @@ public class ChatService {
         Long peerId = session.peerOf(userId);
         ChatSessionVO vo = new ChatSessionVO();
         vo.setId(session.getId());
+        vo.setLastMsgId(session.getLastMsgId());
         vo.setPeerId(peerId);
         vo.setLastMsgText(session.getLastMsgText());
         vo.setLastMsgAt(session.getLastMsgAt());

@@ -47,12 +47,13 @@ public class ChatController {
         return Result.ok(chatService.sessionDetail(StpUtil.getLoginIdAsLong(), id));
     }
 
-    @Operation(summary = "历史消息（id 游标：传当前最早一条的 id 继续往前翻）")
+    @Operation(summary = "历史消息（id 游标：beforeId 往前翻，afterId 断线补拉，两者互斥）")
     @GetMapping("/sessions/{id}/messages")
     public Result<List<ChatMessageVO>> messages(@PathVariable Long id,
                                                 @RequestParam(required = false) Long beforeId,
+                                                @RequestParam(required = false) Long afterId,
                                                 @RequestParam(required = false) Integer size) {
-        return Result.ok(chatService.listMessages(StpUtil.getLoginIdAsLong(), id, beforeId, size));
+        return Result.ok(chatService.listMessages(StpUtil.getLoginIdAsLong(), id, beforeId, afterId, size));
     }
 
     @Operation(summary = "发送消息（WebSocket 未连通时的兜底通道）")
