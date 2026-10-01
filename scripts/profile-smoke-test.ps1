@@ -17,8 +17,12 @@ $origin = $Base -replace '/api/v1/?$', ''
 
 $envFile = Join-Path $root '.env'
 if (Test-Path $envFile) {
-  Get-Content $envFile | Where-Object { $_ -match '^\s*[A-Z_]+=' } | ForEach-Object {
-    $k, $v = $_ -split '=', 2
+  [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) | Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Z_]+=' } | ForEach-Object {
+    $_ = $_.TrimStart([char]0xFEFF).Trim()
+    # .env 里有的变量把注释写在同一行（例：`# 说明... VITE_AMAP_JS_KEY=xxx`），
+    # 直接 split 会把 key 读成注释文本，所以先砍掉 # 之后的内容。
+    $k, $v = ((($_ -split '#', 2)[0]).TrimStart([char]0xFEFF)) -split '=', 2
+    if (-not $k -or -not $v) { continue }
     Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim()
   }
 }

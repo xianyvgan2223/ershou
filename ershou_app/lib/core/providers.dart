@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/api_repository.dart';
 import '../data/api_repository2.dart';
 import '../data/models.dart';
+import '../data/models2.dart' show MapFocus;
 import 'config/server_config.dart';
 import 'config/server_config_service.dart';
 import 'discovery/lan_scanner.dart';
@@ -14,6 +15,7 @@ import 'network/chat_events.dart';
 import 'network/chat_socket.dart';
 import 'storage/chat_cache.dart';
 import 'storage/local_store.dart';
+import '../ui/pages/map_page.dart' show LocationService;
 
 /// main() 里 override 掉，保证全 App 只有一个实例。
 final sharedPreferencesProvider = Provider<SharedPreferences>(
@@ -75,6 +77,25 @@ final chatRepositoryProvider = Provider<ChatRepository>(
 final mapRepositoryProvider = Provider<MapRepository>(
   (ref) => MapRepository(ref.watch(apiClientProvider)),
 );
+
+/// 定位：geolocator 拿 WGS-84 → 转 GCJ-02（不消耗高德配额）
+final locationServiceProvider = Provider<LocationService>(
+  (ref) => const LocationService(),
+);
+
+/// 地图聚焦：商品详情页写它 → 地图页切过去只显示这一个点位。
+/// 见 [MapFocus] 的注释（底部 Tab 没有路由参数，只能靠共享状态）。
+final mapFocusProvider = NotifierProvider<MapFocusNotifier, MapFocus?>(MapFocusNotifier.new);
+
+class MapFocusNotifier extends Notifier<MapFocus?> {
+  @override
+  MapFocus? build() => null;
+
+  void focus(int pointId, {String name = ''}) =>
+      state = MapFocus(pointId: pointId, name: name);
+
+  void clear() => state = null;
+}
 
 final orderRepositoryProvider = Provider<OrderRepository>(
   (ref) => OrderRepository(ref.watch(apiClientProvider)),

@@ -17,6 +17,7 @@ import com.ershou.campus.module.map.entity.TradePoint;
 import com.ershou.campus.module.map.service.TradePointService;
 import com.ershou.campus.module.order.dto.CheckoutDTO;
 import com.ershou.campus.module.order.dto.CreateOrderDTO;
+import com.ershou.campus.module.order.dto.UpdatePointDTO;
 import com.ershou.campus.module.order.entity.MeetupOrder;
 import com.ershou.campus.module.order.mapper.MeetupOrderMapper;
 import com.ershou.campus.module.order.vo.OrderVO;
@@ -469,6 +470,8 @@ public class OrderService {
         map.put("name", p.getName());
         map.put("guideText", p.getGuideText());
         map.put("safetyScore", p.getSafetyScore());
+        map.put("lng", p.getLng());
+        map.put("lat", p.getLat());
         map.put("coordX", p.getCoordX());
         map.put("coordY", p.getCoordY());
         try {
@@ -476,6 +479,69 @@ public class OrderService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    // ---------------------------------------------------------------- 改面交地点
+
+    /**
+     * 改面交地点（可选同时改时间窗）——买卖双方都能改，改完私聊通知对方。
+     *
+     * <p>为什么允许双方改：校园里"3 号楼下"和"图书馆东门"哪个方便是协商出来的，
+     * 只让买家改的话卖家想说"今天食堂那边近"就没辙，只能打字，信息还散落在聊天记录里。
+     *
+     * <p>状态约束：只有待卖家确认(1) / 待面交(2) 能改。已完成(3)/已取消(4)/已失效(5)
+     * 再改没有意义，改出来的结果也不会有人看。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OrderVO updatePoint(Long orderId, Long userId, UpdatePointDTO dto) {
+        MeetupOrder order = requireOrder(orderId, userId);
+        if (order.getStatus() == null || (order.getStatus() != 1 && order.getStatus() != 2)) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前状态不能改面交地点");
+        }
+        if (dto == null || dto.getPointId() == null) {
+            throw new BizException(ResultCode.PARAM_ERROR, "请选择新的面交点");
+        }
+        TradePoint point = tradePointService.getById(dto.getPointId());
+        if (point == null) {
+            throw new BizException(ResultCode.PARAM_ERROR, "面交点不存在");
+        }
+        // 防止把别的小区的点挂上来（地图上根本找不到）
+        Item item = itemMapper.selectById(order.getItemId());
+        if (item != null && item.getCampusId() != null && point.getCampusId() != null
+                && !Objects.equals(item.getCampusId(), point.getCampusId())) {
+            throw new BizException(ResultCode.PARAM_ERROR, "只能选择本校区的面交点");
+        }
+        boolean changeSlot = StringUtils.hasText(dto.getTimeSlotStart()) || StringUtils.hasText(dto.getTimeSlotEnd());
+        if (changeSlot) {
+            validateSlot(dto.getTimeSlotStart(), dto.getTimeSlotEnd());
+        }
+
+        MeetupOrder update = new MeetupOrder();
+        update.setId(orderId);
+        update.setPointId(point.getId());
+        update.setPointSnapshot(snapshot(point));
+        if (changeSlot) {
+            update.setTimeSlotStart(LocalDateTime.parse(dto.getTimeSlotStart(), FMT));
+            update.setTimeSlotEnd(LocalDateTime.parse(dto.getTimeSlotEnd(), FMT));
+        }
+        update.setRescheduleCount((order.getRescheduleCount() == null ? 0 : order.getRescheduleCount()) + 1);
+        orderMapper.updateById(update);
+
+        String actor = Objects.equals(order.getBuyerId(), userId) ? "买家" : "卖家";
+        TxHooks.afterCommit(() -> notifyPeer(order, userId,
+                "【面交地点已更新】《" + order.getItemTitle() + "》\n"
+                        + actor + "把面交点改成了：" + point.getName() + "\n"
+                        + (StringUtils.hasText(point.getGuideText()) ? "指引：" + point.getGuideText() + "\n" : "")
+                        + "时间：" + (changeSlot
+                        ? FMT.format(LocalDateTime.parse(dto.getTimeSlotStart(), FMT))
+                        + " ~ " + FMT.format(LocalDateTime.parse(dto.getTimeSlotEnd(), FMT))
+                        : slotText(order)) + "\n"
+                        + "没意见的话到点见面就行～"));
+        log.info("[order][updatePoint][{}] orderNo={} 面交点改为 {}（第 {} 次调整）",
+                userId, order.getOrderNo(), point.getName(), update.getRescheduleCount());
+
+        MeetupOrder latest = orderMapper.selectById(orderId);
+        return toVO(latest, userId);
     }
 
     /** 下单回执：不再回 lockExpireAt —— 提交意向不锁库，商品是卖家接受时才锁的 */

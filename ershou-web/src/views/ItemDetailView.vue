@@ -210,7 +210,10 @@ onMounted(loadItem)
                 <span v-for="tag in safeTags" :key="tag" class="chip chip--brand">{{ tag }}</span>
               </div>
             </div>
-            <router-link class="point__link" to="/map">在地图上看 →</router-link>
+            <!-- 带上 itemId：地图页会定位并高亮这件商品所在的面交点 -->
+            <router-link class="point__link" :to="{ path: '/map', query: { itemId: item?.id } }">
+              在地图上看 →
+            </router-link>
           </div>
 
           <div class="actions">

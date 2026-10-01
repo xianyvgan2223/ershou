@@ -109,7 +109,14 @@ class MapRepository {
 
   final ApiClient _api;
 
-  Future<MapData> points({int campusId = 1}) async {
+  /// 校区默认值：花江（金鸡岭是 1）。
+  ///
+  /// 之前这里写的是 1，Web 端默认校区早就切到花江（2）了，移动端没跟上——
+  /// 结果 App 上看到的是金鸡岭的点位，而发布商品时后端按用户资料里的校区落花江，
+  /// 两边对不上。默认值统一成花江。
+  static const int defaultCampusId = 2;
+
+  Future<MapData> points({int campusId = defaultCampusId}) async {
     final env = await _api.envelope<MapData>(
       () => _api.dio.get<dynamic>('/map/points', queryParameters: {'campusId': campusId}),
       parse: (data) => MapData.fromJson((data as Map).cast<String, dynamic>()),
@@ -117,7 +124,7 @@ class MapRepository {
     return env.data ?? const MapData();
   }
 
-  Future<List<MapPoint>> tradePoints({int campusId = 1}) async {
+  Future<List<MapPoint>> tradePoints({int campusId = defaultCampusId}) async {
     final env = await _api.envelope<List<MapPoint>>(
       () => _api.dio.get<dynamic>('/trade-points', queryParameters: {'campusId': campusId}),
       parse: (data) => (data as List)
@@ -126,6 +133,136 @@ class MapRepository {
           .toList(),
     );
     return env.data ?? const [];
+  }
+
+  /// 我附近的点位：**服务端走 Redis GEO，不消耗任何高德配额**。
+  ///
+  /// 坐标必须是 **GCJ-02**（浏览器/手机定位拿到的是 WGS-84，先用
+  /// `core/utils/coord.dart` 的 `wgs84ToGcj02()` 转一下）。
+  Future<List<NearbyPoint>> nearby({
+    required double lng,
+    required double lat,
+    int radius = 800,
+    int limit = 12,
+    int campusId = defaultCampusId,
+  }) async {
+    final env = await _api.envelope<List<NearbyPoint>>(
+      () => _api.dio.get<dynamic>('/trade-points/nearby', queryParameters: {
+        'campusId': campusId,
+        'lng': lng,
+        'lat': lat,
+        'radius': radius,
+        'limit': limit,
+      }),
+      parse: (data) => (data as List)
+          .whereType<Map>()
+          .map((e) => NearbyPoint.fromJson(e.cast<String, dynamic>()))
+          .toList(),
+    );
+    return env.data ?? const [];
+  }
+
+  /// 逆地理编码候选：把坐标翻成"这里可能叫什么"（服务端代理高德 Web 服务）。
+  ///
+  /// 服务端没配 `ershou.amap.web-key` 时返回空列表——调用方要能接受"没有候选"，
+  /// 让用户直接手填名称（名称本来就是自由文本）。
+  /// 只消耗基础 LBS 配额（15 万/月），比搜索（5000/月）宽松。
+  Future<List<GeoCandidate>> regeoCandidates({
+    required double lng,
+    required double lat,
+  }) async {
+    final env = await _api.envelope<List<GeoCandidate>>(
+      () => _api.dio.get<dynamic>('/map/regeo', queryParameters: {'lng': lng, 'lat': lat}),
+      parse: (data) => (data as List)
+          .whereType<Map>()
+          .map((e) => GeoCandidate.fromJson(e.cast<String, dynamic>()))
+          .toList(),
+    );
+    return env.data ?? const [];
+  }
+
+  /// 移动端地图页地址：**后端直接吐一个已经带好高德 key 的 HTML**，交给 WebView 加载。
+  ///
+  /// 这样 key 不用打进 App、也不用用户手输（改 key 不用重新发版）。
+  /// - `pickable=true`：点地图回传经纬度，供"在地图上选点"用；
+  /// - `focusPointId`：只画这一个点位（商品详情页「在地图上查看面交点」用）；
+  /// - `wantRegeo=true`：点地图时顺手用页面里的 JS API 做一次逆地理编码，
+  ///   把候选地名一起回传——**这样就不需要额外的 Web 服务 key**
+  ///   （实测现有的 JS API key 打 restapi.amap.com 会被 USERKEY_PLAT_NOMATCH 拒绝）。
+  String amapPageUrl({
+    int campusId = defaultCampusId,
+    bool pickable = false,
+    int? focusPointId,
+    bool wantRegeo = false,
+    String? mergedPointsJson,
+  }) {
+    final base = _api.dio.options.baseUrl;
+    final focus = focusPointId == null ? '' : '&focusPointId=$focusPointId';
+    final regeo = wantRegeo ? '&wantRegeo=true' : '';
+    // 合并后的展示点位：**只影响画气泡**，每个气泡带 ids（组内真实点位 id），
+    // 点它回传 ids，业务侧仍按精确点位处理（商品详情/面交单引用的 pointId 不变）
+    final merged = (mergedPointsJson == null || mergedPointsJson.isEmpty)
+        ? ''
+        : '&mapPoints=${Uri.encodeQueryComponent(mergedPointsJson)}';
+    return '$base/map/amap-html?campusId=$campusId&pickable=$pickable$focus$regeo$merged';
+  }
+
+  /// 后端有没有配高德 key（没配就退回自绘底图，而不是给用户一个白屏）
+  Future<bool> amapConfigured() async {
+    try {
+      final env = await _api.envelope<bool>(
+        () => _api.dio.get<dynamic>('/map/amap-status'),
+        parse: (data) => (data as Map)['configured'] == true,
+      );
+      return env.data ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 用户在地图上新增面交点（免审核、每次新建、不做同名合并）
+  Future<MapPoint> createPoint({
+    required String name,
+    required double lng,
+    required double lat,
+    int? pointType,
+    String? guideText,
+    int campusId = defaultCampusId,
+  }) async {
+    final env = await _api.envelope<MapPoint>(
+      () => _api.dio.post<dynamic>('/trade-points', data: {
+        'campusId': campusId,
+        'name': name,
+        'lng': lng,
+        'lat': lat,
+        if (pointType != null) 'pointType': pointType,
+        if (guideText != null && guideText.isNotEmpty) 'guideText': guideText,
+      }),
+      parse: (data) => MapPoint.fromJson((data as Map).cast<String, dynamic>()),
+    );
+    return env.data!;
+  }
+
+  /// 把高德搜索到的地点落库（source=3），供以后查库、不再消耗搜索配额。
+  /// 后端按"校区 + 名称"幂等：已有同名就复用那条，不会重复插。
+  Future<MapPoint> saveSearchHit({
+    required String name,
+    required double lng,
+    required double lat,
+    String? guideText,
+    int campusId = defaultCampusId,
+  }) async {
+    final env = await _api.envelope<MapPoint>(
+      () => _api.dio.post<dynamic>('/trade-points/search-hit', data: {
+        'campusId': campusId,
+        'name': name,
+        'lng': lng,
+        'lat': lat,
+        if (guideText != null && guideText.isNotEmpty) 'guideText': guideText,
+      }),
+      parse: (data) => MapPoint.fromJson((data as Map).cast<String, dynamic>()),
+    );
+    return env.data!;
   }
 }
 

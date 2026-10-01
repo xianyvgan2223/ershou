@@ -12,9 +12,12 @@ import {
   confirmMeetupOrder,
   fetchMeetupOrders,
   rejectMeetupOrder,
+  updateMeetupPoint,
 } from '@/api/order'
 import type { OrderVO } from '@/api/order'
+import type { TradePoint } from '@/api/map'
 import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
+import PointPickerDialog from '@/components/PointPickerDialog.vue'
 import { useChatStore } from '@/stores/chat'
 import { useMeetupStore } from '@/stores/meetup'
 import { uploadFile } from '@/api/file'
@@ -54,6 +57,28 @@ const orderLoading = ref(false)
 const orderActionId = ref(false)
 const bookingVisible = ref(false)
 const isSeller = computed(() => session.value?.myRole === 'seller')
+
+/* ---------- 改面交地点（买卖双方都能改，改完对方收到私聊提醒） ---------- */
+const changePointVisible = ref(false)
+
+/** 会话里点"改面交地点"：对话框自己解析校区与底图，这里只管开 */
+function openChangePoint(): void {
+  if (!activeOrder.value) return
+  changePointVisible.value = true
+}
+
+/** 选点对话框已把点位建好（同名复用），这里把它落到面交单上 */
+async function handlePointPicked(point: TradePoint): Promise<void> {
+  const order = activeOrder.value
+  if (!order) return
+  try {
+    await updateMeetupPoint(order.id, { pointId: point.id })
+    showTip(`面交地点已改为「${point.name}」，已通知对方`)
+    await loadActiveOrder()
+  } catch {
+    // 响应拦截器已提示（例如状态已变 30003）
+  }
+}
 
 async function loadActiveOrder(): Promise<void> {
   const current = session.value
@@ -467,7 +492,20 @@ onMounted(async () => {
               面交点：{{ activeOrder.pointName || '待协商' }}
               · 时间：{{ activeOrder.timeSlotStart ? `${formatDateTime(activeOrder.timeSlotStart)} ~ ${formatDateTime(activeOrder.timeSlotEnd)}` : '待协商' }}
             </span>
+            <!-- 买卖双方都能改地点：校园里哪个门方便是聊出来的，让一侧改不了就只能打字 -->
+            <el-button
+              v-if="activeOrder.status === 1 || activeOrder.status === 2"
+              class="trade__edit"
+              size="small"
+              text
+              type="primary"
+              :disabled="orderActionId"
+              @click="openChangePoint"
+            >
+              {{ activeOrder.pointName ? '改面交地点' : '约定面交地点' }}
+            </el-button>
           </div>
+          <p v-if="activeOrder.pointGuide" class="trade__guide">指引：{{ activeOrder.pointGuide }}</p>
           <p v-if="activeOrder.remark" class="trade__remark">买家留言：{{ activeOrder.remark }}</p>
 
           <div class="trade__actions">
@@ -641,6 +679,9 @@ onMounted(async () => {
       :item-id="session.itemId"
       @success="handleBooked"
     />
+
+    <!-- 改面交地址：地图选点（可新建地点，免审核）→ 立刻落到面交单并通知对方 -->
+    <PointPickerDialog v-model="changePointVisible" @created="handlePointPicked" />
   </div>
 </template>
 
@@ -1173,6 +1214,16 @@ onMounted(async () => {
   &__meta {
     color: var(--text-2);
     font-size: 13px;
+  }
+
+  &__edit {
+    margin-left: auto;
+  }
+
+  &__guide {
+    margin: 6px 0 0;
+    color: var(--brand-700);
+    font-size: 12.5px;
   }
 
   &__remark {

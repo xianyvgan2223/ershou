@@ -12,6 +12,9 @@ const PROXY_TARGET = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
 // 校园二手交易平台 · 学生端构建配置
 export default defineConfig({
+  // 高德等密钥统一放仓库根目录的 .env（已被 .gitignore 忽略），前端只读 VITE_ 前缀的变量。
+  // 注意：vite 仍会加载 ershou-web/.env*，两者同名时以 .env.local 优先。
+  envDir: '..',
   plugins: [
     vue(),
     // 自动引入 vue / vue-router / pinia 的组合式 API 与 Element Plus 的函数式组件（ElMessage 等）

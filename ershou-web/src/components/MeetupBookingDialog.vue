@@ -50,7 +50,13 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const { points, loading: pointsLoading, load: loadPoints, find: findPoint } = useTradePoints()
+// options 是"100 米内合并后"的展示列表；findPoint 查的仍是原始点位（拿精确地址）
+const {
+  options: pointOptions,
+  loading: pointsLoading,
+  load: loadPoints,
+  find: findPoint,
+} = useTradePoints()
 
 const submitting = ref(false)
 const form = reactive({
@@ -147,7 +153,7 @@ async function submit(): Promise<void> {
           style="width: 100%"
         >
           <el-option
-            v-for="point in points"
+            v-for="point in pointOptions"
             :key="point.id"
             :label="`${point.name}（${pointTypeLabel(point.type)}）`"
             :value="point.id"

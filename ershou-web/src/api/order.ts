@@ -96,6 +96,21 @@ export function createMeetupOrder(params: CreateMeetupOrderParams): Promise<Chec
   return http.post<CheckoutResult>('/meetup-orders', params)
 }
 
+/** 改面交地点（买卖双方都能改；可选同时改时间窗，都留空表示沿用原时间） */
+export interface UpdateMeetupPointParams {
+  pointId: number
+  timeSlotStart?: string
+  timeSlotEnd?: string
+}
+
+/**
+ * 改面交地点：私聊页里协商好新地点后调用。
+ * 后端会校验"只有待确认/待面交"能改，并给对面发一条私聊提醒。
+ */
+export function updateMeetupPoint(id: number, params: UpdateMeetupPointParams): Promise<OrderVO> {
+  return http.patch<OrderVO>(`/meetup-orders/${id}/point`, params)
+}
+
 /** 卖家接受面交单 */
 export function acceptMeetupOrder(id: number): Promise<null> {
   return http.post<null>(`/meetup-orders/${id}/accept`)

@@ -473,11 +473,39 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   }
 
   Widget _meetupCard(Item item) {
+    // "在地图上查看" 只在有面交点、且商品还能交易时给：
+    // 点它会切到地图 Tab 并只显示这个点位（靠 mapFocusProvider 传递，
+    // 因为地图是底部 Tab，没有路由参数可带）
+    final canShowOnMap = item.preferPointId != null && item.preferPointId! > 0;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: '建议面交点'),
+          Row(
+            children: [
+              const Expanded(child: SectionHeader(title: '建议面交点')),
+              if (canShowOnMap)
+                TextButton.icon(
+                  onPressed: () {
+                    ref.read(mapFocusProvider.notifier).focus(
+                          item.preferPointId!,
+                          name: item.preferPointName,
+                        );
+                    ref.read(navIndexProvider.notifier).select(2);
+                    // ⚠️ 必须把详情页退掉：详情页是压在 Shell 之上的路由，
+                    // 只切 Tab 的话地图在下面，用户看到的还是详情页，会以为"点了没反应"。
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.map_outlined, size: 15),
+                  label: const Text('在地图上查看', style: TextStyle(fontSize: 12.5)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
           Row(
             children: [
               Container(

@@ -65,6 +65,17 @@ ershou:
   crypto:
     # 手机号 AES 密钥（16 位）。生产环境必须换成随机值并用环境变量注入
     phone-key: ${PHONE_AES_KEY:__REDACTED_PHONE_KEY__}
+  amap:
+    # 高德 Web端(JS API) key：**给前端用的公开 key，不是密钥**（真正要保密的是 Web 服务 key）。
+    # 放后端是为了让移动端（WebView 承载高德地图）不用把 key 打进 App、也不用用户手输：
+    # App 直接 GET /api/v1/map/amap-html 拿到一个已经带好 key 的地图页。
+    # 安全密钥 securityJsCode 也必须一起下发——2021-12-02 后创建的 key 强制要求。
+    js-key: ${AMAP_JS_KEY:}
+    js-security-code: ${AMAP_JS_SECURITY_CODE:}
+    # Web 服务 key（restapi.amap.com 用，需要在控制台绑定 IP 白名单）。
+    # 只用于服务端调用（目前是选点后的逆地理编码），**绝不下发给前端**。
+    # 没配时 /map/regeo 会返回空列表，移动端退化为"手动填名称"。
+    web-key: ${AMAP_WEB_KEY:}
   sms:
     mock: true
     mock-code: "123456"

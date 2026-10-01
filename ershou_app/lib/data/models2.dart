@@ -160,23 +160,42 @@ class MapPoint {
     this.type = 9,
     this.coordX = 0,
     this.coordY = 0,
+    this.lng,
+    this.lat,
     this.safetyScore = 0,
     this.safeTags = const [],
     this.itemCount = 0,
     this.minPrice = 0,
     this.guideText = '',
+    this.source,
   });
 
   final int id;
   final String name;
   final int type;
+  /// 自绘底图校区（map_type=1）的像素坐标
   final double coordX;
   final double coordY;
+  /// 高德校区（map_type=2）的 GCJ-02 经纬度；没有时回退到像素坐标换算
+  final double? lng;
+  final double? lat;
   final int safetyScore;
   final List<String> safeTags;
   final int itemCount;
   final double minPrice;
   final String guideText;
+  /// 来源：1=官方 2=用户提交 3=高德搜索落库
+  final int? source;
+
+  /// 高德坐标是否可用（真地图上必须用经纬度，像素坐标画不上去）
+  bool get hasGeo => lng != null && lat != null;
+
+  /// 合并分组用的坐标（同一套坐标系内才有意义）
+  (double, double)? get mergeCoord {
+    if (hasGeo) return (lng!, lat!);
+    if (coordX != 0 || coordY != 0) return (coordX, coordY);
+    return null;
+  }
 
   static String typeLabel(int type) {
     switch (type) {
@@ -205,6 +224,8 @@ class MapPoint {
         type: _intOf(j['type']) == 0 ? 9 : _intOf(j['type']),
         coordX: _num(j['coordX']),
         coordY: _num(j['coordY']),
+        lng: j['lng'] == null ? null : _num(j['lng']),
+        lat: j['lat'] == null ? null : _num(j['lat']),
         safetyScore: _intOf(j['safetyScore']),
         safeTags: ((j['safeTags'] as List?) ?? const [])
             .map((e) => _str(e))
@@ -212,6 +233,76 @@ class MapPoint {
         itemCount: _intOf(j['itemCount']),
         minPrice: _num(j['minPrice']),
         guideText: _str(j['guideText']),
+        source: _intOrNull(j['source']),
+      );
+}
+
+/// 地图聚焦请求：商品详情页「在地图上看」用它把地图页切到"只看这一个点位"。
+///
+/// 为什么要有这个：移动端地图是底部 Tab（IndexedStack 保活），
+/// 没有路由可带参数，只能靠一个共享状态把"要聚焦哪个点位"传过去。
+/// 顺便把名称带上——地图页自己不用再为它查一次接口（它只加载一次校区点位）。
+class MapFocus {
+  const MapFocus({required this.pointId, this.name = ''});
+
+  final int pointId;
+  final String name;
+}
+
+/// 逆地理编码的一个候选地名（服务端 /map/regeo 返回）
+class GeoCandidate {
+  const GeoCandidate({
+    required this.name,
+    this.address = '',
+    this.distanceMeters = 0,
+    this.isPoi = true,
+  });
+
+  final String name;
+  final String address;
+  final double distanceMeters;
+  /// false = 兜底的"门牌地址"，不是 POI
+  final bool isPoi;
+
+  factory GeoCandidate.fromJson(Map<String, dynamic> j) => GeoCandidate(
+        name: (j['name'] ?? '').toString(),
+        address: (j['address'] ?? '').toString(),
+        distanceMeters: _num(j['distanceMeters']),
+        isPoi: j['isPoi'] != false,
+      );
+}
+
+/// 附近点位（服务端 Redis GEO 检索，附带到我的距离）
+class NearbyPoint {
+  const NearbyPoint({
+    required this.id,
+    this.name = '',
+    this.pointType = 9,
+    this.lng,
+    this.lat,
+    this.guideText = '',
+    this.source,
+    this.distanceMeters = 0,
+  });
+
+  final int id;
+  final String name;
+  final int pointType;
+  final double? lng;
+  final double? lat;
+  final String guideText;
+  final int? source;
+  final double distanceMeters;
+
+  factory NearbyPoint.fromJson(Map<String, dynamic> j) => NearbyPoint(
+        id: _intOf(j['id']),
+        name: _str(j['name']),
+        pointType: _intOf(j['pointType']) == 0 ? 9 : _intOf(j['pointType']),
+        lng: j['lng'] == null ? null : _num(j['lng']),
+        lat: j['lat'] == null ? null : _num(j['lat']),
+        guideText: _str(j['guideText']),
+        source: _intOrNull(j['source']),
+        distanceMeters: _num(j['distanceMeters']),
       );
 }
 

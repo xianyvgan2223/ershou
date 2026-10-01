@@ -17,6 +17,10 @@ const props = withDefaults(
     mapConfig?: MapConfig | null
     height?: string
     selectedId?: number | null
+    /** 需要高亮标记的商品所在点位（与 AmapCampusMap 保持同一套对外接口） */
+    highlightPointId?: number | null
+    /** 合并组信息：点位 id → 组内点位个数（>1 显示 N 角标），与 AmapCampusMap 一致 */
+    groupCounts?: Record<number, number>
     showLegend?: boolean
     showLabel?: boolean
   }>(),
@@ -25,6 +29,8 @@ const props = withDefaults(
     mapConfig: null,
     height: '600px',
     selectedId: null,
+    highlightPointId: null,
+    groupCounts: () => ({}),
     showLegend: true,
     showLabel: true,
   },
@@ -91,11 +97,42 @@ function renderBaseLayer(): void {
   map.fitBounds(currentBounds(), { padding: [16, 16] })
 }
 
+/**
+ * 气泡内容：数字 + 名称标签 +（合并组时）右上角 N 角标。
+ *
+ * 与 AmapCampusMap 的 `bubbleHtml` 保持同样的观感与类名，两个组件对外契约才真的一致。
+ * 注意这里是**合并前的单个点位**；组内个数由父组件通过 `groupCounts` 传进来
+ * （合并逻辑在 `utils/pointMerge.ts`，组件本身不参与计算）。
+ */
 function bubbleHtml(point: MapPoint): string {
   const classNames = ['campus-map__bubble']
   if (!point.itemCount) classNames.push('is-empty')
   if (props.selectedId === point.id) classNames.push('is-active')
-  return `<div class="${classNames.join(' ')}">${point.itemCount}</div>`
+  if (props.highlightPointId === point.id) classNames.push('is-highlight')
+  const memberCount = props.groupCounts[point.id] ?? 1
+  if (memberCount > 1) classNames.push('is-merged')
+  const badge = memberCount > 1 ? `<i class="campus-map__merged">${memberCount}</i>` : ''
+  const label = props.showLabel
+    ? `<span class="campus-map__label">${escapeHtml(point.name)}</span>`
+    : ''
+  return `<div class="campus-map__marker">${badge}<span class="${classNames.join(' ')}">${point.itemCount ?? 0}</span>${label}</div>`
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case '&':
+        return '&amp;'
+      case '<':
+        return '&lt;'
+      case '>':
+        return '&gt;'
+      case '"':
+        return '&quot;'
+      default:
+        return '&#39;'
+    }
+  })
 }
 
 function renderMarkers(): void {
@@ -103,6 +140,9 @@ function renderMarkers(): void {
   if (!markerLayer) markerLayer = L.layerGroup().addTo(map)
   markerLayer.clearLayers()
   props.points.forEach((point) => {
+    // 换用第三方地图的校区可能没有像素坐标，自绘底图下就跳过
+    if (point.coordX === null || point.coordX === undefined) return
+    if (point.coordY === null || point.coordY === undefined) return
     const marker = L.marker([point.coordY, point.coordX], {
       icon: L.divIcon({
         className: 'campus-map__marker',
@@ -135,7 +175,8 @@ function renderMarkers(): void {
 function panToSelected(): void {
   if (!map || props.selectedId === null) return
   const target = props.points.find((point) => point.id === props.selectedId)
-  if (target) map.panTo([target.coordY, target.coordX])
+  if (target?.coordX == null || target?.coordY == null) return
+  map.panTo([target.coordY, target.coordX])
 }
 
 function invalidateSize(): void {
@@ -350,6 +391,41 @@ defineExpose({ invalidateSize, refresh })
       background: var(--accent-500);
       transform: scale(1.1);
     }
+
+    &.is-highlight {
+      background: #ef4444;
+      transform: scale(1.15);
+      box-shadow: 0 0 0 6px rgb(239 68 68 / 22%);
+    }
+
+    // 合并组（100 米内多个点位）：紫色描边，右上角另有 N 角标
+    &.is-merged {
+      border-color: #ddd6fe;
+    }
+  }
+
+  // 与 AmapCampusMap 的角标观感保持一致
+  :deep(.campus-map__marker) {
+    position: relative;
+  }
+
+  :deep(.campus-map__merged) {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    z-index: 2;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border: 1.5px solid #fff;
+    border-radius: 999px;
+    background: #7c3aed;
+    color: #fff;
+    font-size: 10.5px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 13px;
+    text-align: center;
   }
 
   :deep(.campus-map__label) {

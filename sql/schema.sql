@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS trade_point (
   id             BIGINT       NOT NULL AUTO_INCREMENT,
   campus_id      BIGINT       NOT NULL,
   name           VARCHAR(64)  NOT NULL COMMENT '点位名称',
-  source         TINYINT      NOT NULL DEFAULT 1 COMMENT '1=官方 2=用户提交',
+  source         TINYINT      NOT NULL DEFAULT 1 COMMENT '来源 1=官方 2=用户提交 3=高德搜索落库',
   point_type     TINYINT      NOT NULL DEFAULT 9 COMMENT '1=门卫室旁 2=食堂 3=广场 4=快递站 5=教学楼大厅 6=校警室旁 7=宿舍区 9=其他',
   coord_x        DECIMAL(10,2) DEFAULT NULL COMMENT '自绘底图坐标X(像素)',
   coord_y        DECIMAL(10,2) DEFAULT NULL COMMENT '自绘底图坐标Y(像素)',

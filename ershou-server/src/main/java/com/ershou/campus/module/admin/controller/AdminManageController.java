@@ -14,6 +14,7 @@ import com.ershou.campus.module.admin.vo.AdminItemVO;
 import com.ershou.campus.module.admin.vo.AdminOrderVO;
 import com.ershou.campus.module.admin.vo.AdminUserVO;
 import com.ershou.campus.module.admin.vo.AuditLogVO;
+import com.ershou.campus.module.map.service.TradePointService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -34,6 +35,14 @@ public class AdminManageController {
     private final AdminOrderService orderService;
     private final AdminUserService userService;
     private final AdminLogService logService;
+    private final TradePointService tradePointService;
+
+    @Operation(summary = "清理没有商品的面交点（立即执行；定时任务每天 03:10 也会跑）")
+    @PostMapping("/trade-points/cleanup-empty")
+    public Result<Integer> cleanupEmptyPoints() {
+        adminAuthService.requireAdminId();
+        return Result.ok(tradePointService.cleanupEmptyPoints());
+    }
 
     @Operation(summary = "商品管理列表（全部状态）")
     @GetMapping("/items")

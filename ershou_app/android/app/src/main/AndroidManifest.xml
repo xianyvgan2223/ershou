@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- 定位：geolocator 拿 WGS-84，再转成高德用的 GCJ-02。
+         用于「我的位置」蓝点、以及"我附近的点位"（服务端 Redis GEO 检索）。
+         没有定位权限也不影响地图浏览，只是这两个功能不可用。 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application
         android:usesCleartextTraffic="true"
         android:label="校园二手"

@@ -10,6 +10,7 @@ import '../../data/models2.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
+import 'point_picker_page.dart';
 
 /// 发布闲置：多图上传 → 填信息 → 提交（后端会机审）。
 ///
@@ -680,45 +681,87 @@ class _PublishPageState extends ConsumerState<PublishPage> {
   }
 
   Widget _pointCard() {
+    final selected = _points.where((p) => p.id == _pointId).toList();
+    final current = selected.isEmpty ? null : selected.first;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: '建议面交点', subtitle: '选填 · 校内更安全'),
+          Row(
+            children: [
+              const Expanded(
+                child: SectionHeader(title: '面交点', subtitle: '选填 · 校内面交更安全'),
+              ),
+              // 选点入口：地图上自己点一个（免审核、立刻可用）
+              TextButton.icon(
+                onPressed: _openPointPicker,
+                icon: const Icon(Icons.add_location_alt_outlined, size: 15),
+                label: const Text('地图上选', style: TextStyle(fontSize: 12.5)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          // 已选：一行说清楚（名称 + 清除），比一堆 chip 干净
+          if (current != null) ...[
+            Row(
+              children: [
+                const Icon(Icons.place, size: 15, color: AppColors.brandDark),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    current.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.brandDark),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => setState(() => _pointId = null),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child: Icon(Icons.close, size: 15, color: AppColors.inkFaint),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
           if (_points.isEmpty)
             const Text(
-              '还没加载到点位，可以先不选，买家在私聊里约也行',
-              style: TextStyle(fontSize: 12, color: AppColors.inkFaint),
+              '还没加载到点位，可以点「地图上选」自己加一个，或先不选',
+              style: TextStyle(fontSize: 12, color: AppColors.inkFaint, height: 1.5),
             )
           else
+            // 常用点位：只给最近的几个，其余走"地图上选"，避免一大片 chip 把页面撑长
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: [
-                for (final p in _points.take(8))
+                for (final p in _points.take(5))
                   GestureDetector(
                     onTap: () => setState(
                       () => _pointId = _pointId == p.id ? null : p.id,
                     ),
                     child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                       decoration: BoxDecoration(
                         color: _pointId == p.id ? AppColors.brandSoft : AppColors.bg,
                         borderRadius: BorderRadius.circular(AppRadius.chip),
                         border: Border.all(
-                          color: _pointId == p.id
-                              ? AppColors.brand
-                              : Colors.transparent,
+                          color: _pointId == p.id ? AppColors.brand : Colors.transparent,
                         ),
                       ),
                       child: Text(
                         p.name,
                         style: TextStyle(
                           fontSize: 12,
-                          color: _pointId == p.id
-                              ? AppColors.brandDark
-                              : AppColors.inkSoft,
+                          color: _pointId == p.id ? AppColors.brandDark : AppColors.inkSoft,
                         ),
                       ),
                     ),
@@ -728,6 +771,22 @@ class _PublishPageState extends ConsumerState<PublishPage> {
         ],
       ),
     );
+  }
+
+  /// 打开地图选点：在真实高德地图上点一下 → 服务端反查地名 → 建成点位 → 自动选中
+  Future<void> _openPointPicker() async {
+    final created = await Navigator.of(context).push<MapPoint>(
+      MaterialPageRoute<MapPoint>(builder: (_) => const PointPickerPage()),
+    );
+    if (created == null || !mounted) return;
+    setState(() {
+      // 新点位插到列表最前，并直接选中——用户刚建完就是想用它
+      if (_points.every((p) => p.id != created.id)) {
+        _points = [created, ..._points];
+      }
+      _pointId = created.id;
+    });
+    showToast(context, '已新增「${created.name}」并选中');
   }
 
   /// 底部固定提交栏：错误就近显示，按钮常驻可见

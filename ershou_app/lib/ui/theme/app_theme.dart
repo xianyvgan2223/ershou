@@ -28,13 +28,13 @@ class AppSpacing {
   const AppSpacing._();
 
   /// 卡片内边距
-  static const cardPadding = 11.0;
+  static const cardPadding = 14.0;
 
   /// 列表/网格的外边距
-  static const page = 9.0;
+  static const page = 12.0;
 
   /// 卡片之间的间距
-  static const gap = 8.0;
+  static const gap = 10.0;
 
   /// 顶部 AppBar 高度（Flutter 默认 56，太高）
   static const appBarHeight = 42.0;
@@ -80,24 +80,34 @@ class AppTheme {
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
       ),
+      // 输入框：**默认无边框的浅底胶囊**，只有聚焦时才出现一圈品牌色细边。
+      // 原来每个框都描一圈灰边，一屏十来个框看着很"表格化"，不够简约；
+      // 浅底 + 无边框留白更多，聚焦态也更明确。
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white,
-        // 输入框内容与内边距一起收窄，输入区矮一点、字小一点
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        fillColor: AppColors.bg,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         isDense: true,
         hintStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 13),
+        // 字数统计平时不显示（10/40 这种小字很吵），只在接近上限时出现
+        counterStyle: const TextStyle(color: AppColors.inkFaint, fontSize: 11),
+        labelStyle: const TextStyle(color: AppColors.inkSoft, fontSize: 12.5),
+        floatingLabelStyle: const TextStyle(color: AppColors.brandDark, fontSize: 12.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.field),
-          borderSide: const BorderSide(color: AppColors.line),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.field),
-          borderSide: const BorderSide(color: AppColors.line),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.field),
-          borderSide: const BorderSide(color: AppColors.brand, width: 1.6),
+          borderSide: const BorderSide(color: AppColors.brand, width: 1.4),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadius.field),
+          borderSide: const BorderSide(color: AppColors.price, width: 1.2),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(

@@ -14,11 +14,15 @@ public class PointSuggestDTO {
     @NotBlank(message = "请填写点位名称")
     private String name;
 
-    @NotNull(message = "请在地图上选点")
+    /** 自绘底图用的像素坐标（map_type=1），与 lng/lat 二选一 */
     private BigDecimal coordX;
 
-    @NotNull(message = "请在地图上选点")
     private BigDecimal coordY;
+
+    /** 高德地图坐标（GCJ-02 火星坐标，map_type=2 用这个） */
+    private BigDecimal lng;
+
+    private BigDecimal lat;
 
     private String guideText;
     private Integer pointType = 9;

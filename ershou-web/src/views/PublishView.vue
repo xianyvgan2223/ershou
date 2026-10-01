@@ -4,18 +4,28 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import ImageUploader from '@/components/ImageUploader.vue'
+import PointPickerDialog from '@/components/PointPickerDialog.vue'
 import { fetchCategories } from '@/api/auth'
 import { publishItem } from '@/api/item'
-import { pointTypeLabel } from '@/api/map'
+import { fetchMapPoints, pointTypeLabel } from '@/api/map'
+import type { MapConfig, TradePoint } from '@/api/map'
 import { tradePointLabel, useTradePoints } from '@/composables/useTradePoints'
 import type { Category } from '@/api/types'
 import { CONDITION_OPTIONS } from '@/utils/constants'
 
 const router = useRouter()
 
-const { points: tradePoints, loading: pointsLoading, load: loadTradePoints } = useTradePoints()
+const {
+  options: tradePoints,
+  loading: pointsLoading,
+  campusId,
+  load: loadTradePoints,
+  add: addTradePoint,
+} = useTradePoints()
 const categories = ref<Category[]>([])
 const submitting = ref(false)
+const pickerVisible = ref(false)
+const mapConfig = ref<MapConfig | null>(null)
 
 const form = reactive({
   title: '',
@@ -42,6 +52,19 @@ async function loadBaseData(): Promise<void> {
     categories.value = []
   }
   await loadTradePoints()
+  try {
+    // 必须传用户所在校区：漏传会拿到默认校区的底图，选址对话框就会显示到别的校区去
+    const mapData = await fetchMapPoints(campusId.value)
+    mapConfig.value = mapData.mapConfig ?? null
+  } catch {
+    mapConfig.value = null
+  }
+}
+
+/** 地图选点新建地点后：立刻插入下拉选项并选中（PointPickerDialog 已把点位写进共享列表） */
+function handlePointCreated(point: TradePoint): void {
+  addTradePoint(point, true)
+  form.preferPointId = point.id
 }
 
 function resetForm(): void {
@@ -209,13 +232,13 @@ onMounted(loadBaseData)
                   <p class="publish__point-empty">当前校区还没有可选点位</p>
                 </template>
                 <template #footer>
-                  <div class="publish__point-more" @click="router.push('/map')">
+                  <div class="publish__point-more" @click="pickerVisible = true">
                     <el-icon><Plus /></el-icon>
-                    找不到合适的地点？去地图上推荐一个新点位
+                    没有合适的地点？在地图上选一个真实地址
                   </div>
                 </template>
               </el-select>
-              <el-button text type="primary" @click="router.push('/map')">去地图上看点位</el-button>
+              <el-button text type="primary" @click="pickerVisible = true">地图上新增地点</el-button>
             </el-form-item>
 
             <el-form-item>
@@ -257,6 +280,13 @@ onMounted(loadBaseData)
         </el-card>
       </el-col>
     </el-row>
+
+    <PointPickerDialog
+      v-model="pickerVisible"
+      :campus-id="campusId"
+      :map-config="mapConfig"
+      @created="handlePointCreated"
+    />
   </div>
 </template>
 

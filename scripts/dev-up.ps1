@@ -21,7 +21,7 @@ if (-not (Test-Path $envFile)) {
   Write-Host '未找到 .env，请先执行： copy .env.example .env  并填写密码' -ForegroundColor Red
   exit 1
 }
-$vars = Get-Content $envFile | Where-Object { $_ -match '^\s*[A-Z_]+=' }
+$vars = [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) | Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Z_]+=' }
 foreach ($line in $vars) {
   $k, $v = $line -split '=', 2
   Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim()
@@ -52,7 +52,10 @@ Write-Host ''
 
 # 6) 汇总
 Write-Host ''
-docker ps --filter name=ershou --format '{{.Names}}  |  {{.Status}}  |  {{.Ports}}'
+$line = $line.TrimStart([char]0xFEFF).Trim()
+# ⚠️ 同一行可能带注释（`# ... KEY=value`），先砍注释再解析
+$k, $v = (($line -split '#', 2)[0]) -split '=', 2
+if (-not $k -or -not $v) { continue }
 Write-Host ''
 Write-Host ('Redis  : 127.0.0.1:' + $env:REDIS_PORT + '   (密码见 .env 的 REDIS_PASSWORD)') -ForegroundColor Green
 Write-Host ('MinIO  : API http://127.0.0.1:' + $env:MINIO_API_PORT + '   控制台 http://127.0.0.1:' + $env:MINIO_CONSOLE_PORT) -ForegroundColor Green

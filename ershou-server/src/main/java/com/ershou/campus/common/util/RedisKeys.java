@@ -71,6 +71,25 @@ public final class RedisKeys {
         return "ershou:dict:category:" + categoryId;
     }
 
+    /**
+     * 校区点位的地理位置索引（Redis GEO，member = pointId）。
+     *
+     * <p>用途：按坐标找附近点位（"我周围 300 米有哪些面交点"），
+     * 全程走 Redis，**不消耗任何高德配额**。
+     *
+     * <p>只放有经纬度的点位（自绘底图校区的像素坐标不是地理坐标，放进来算出来的是错的）。
+     * 与 {@code ershou:map:points:*} 一样用版本号失效——写点位时 bump 版本号，
+     * key 里的版本号一变，旧索引立刻不可达，由下次查询按 DB 重建。
+     */
+    public static String mapGeo(Long campusId, long version) {
+        return "ershou:map:geo:" + campusId + ":v" + version;
+    }
+
+    /** 附近点位是否已有实例在重建（避免并发查询一起全量重建） */
+    public static String mapGeoRebuildLock(Long campusId) {
+        return "ershou:map:geo:rebuild:" + campusId;
+    }
+
     public static String dictPoint(Long pointId) {
         return "ershou:dict:point:" + pointId;
     }

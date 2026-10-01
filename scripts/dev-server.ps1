@@ -41,8 +41,12 @@ Write-Host ('使用 Maven: ' + $mvn)
 # 载入 .env（供 application-dev.yml 的占位符使用；也可用 local profile 覆盖）
 $envFile = Join-Path $root '.env'
 if (Test-Path $envFile) {
-  Get-Content $envFile | Where-Object { $_ -match '^\s*[A-Z_]+=' } | ForEach-Object {
-    $k, $v = $_ -split '=', 2
+  [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) | Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Z_]+=' } | ForEach-Object {
+    $_ = $_.TrimStart([char]0xFEFF).Trim()
+    # .env 里有的变量把注释写在同一行（例：`# 说明... VITE_AMAP_JS_KEY=xxx`），
+    # 直接 split 会把 key 读成注释文本，所以先砍掉 # 之后的内容。
+    $k, $v = ((($_ -split '#', 2)[0]).TrimStart([char]0xFEFF)) -split '=', 2
+    if (-not $k -or -not $v) { continue }
     Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim()
   }
   Write-Host '已载入 .env'

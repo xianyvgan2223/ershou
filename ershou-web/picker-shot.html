@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>选址弹窗预览</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      // 独立预览页：只挂载选址弹窗，绕开登录与路由，方便截图排查视觉问题。
+      // 用法：开发时访问 http://localhost:5173/picker-shot.html
+      //   ?t=<token>            带上登录态（弹窗里的 /api 请求要用）
+      //   ?pick=110.4188,25.3133  预置一次"用户点了地图"，便于截图看候选列表与标记
+      // 注意：必须照 main.ts 的初始化来（Pinia + 项目样式），否则组件里的 store 和
+      //       CSS 变量（--brand-500 等）都会缺，页面会是空白。
+      import { createApp, h, ref } from 'vue'
+      import { createPinia } from 'pinia'
+      import '/src/styles/main.scss'
+      import PointPickerDialog from '/src/components/PointPickerDialog.vue'
+
+      const q = new URLSearchParams(location.search)
+      const visible = ref(true)
+      const token = q.get('t')
+      if (token) localStorage.setItem('ershou_token', token)
+      // 预置选点参数直接透传给组件（组件自己解析 ?pick=）
+      void q.get('pick')
+
+      const app = createApp({
+        render: () =>
+          h(PointPickerDialog, {
+            modelValue: visible.value,
+            'onUpdate:modelValue': (v) => (visible.value = v),
+            campusId: 2,
+            onCreated: (p) => console.log('created', p),
+          }),
+      })
+      app.use(createPinia())
+      app.mount('#app')
+    </script>
+  </body>
+</html>

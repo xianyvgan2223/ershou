@@ -48,6 +48,12 @@ dependencies:
   # flutter_cache_manager 的传递依赖里，提成直接依赖不需要额外下载。
   sqflite: ^2.4.4
   path_provider: ^2.1.6
+  # 校内地图：用 WebView 承载高德 JS API（与 Web 端同一套渲染逻辑），
+  # 比原生 amap_flutter_map 稳：不用改 Android 清单、不用配隐私合规、交互逻辑与网页端一致。
+  webview_flutter: ^4.14.1
+  # 定位：浏览器 WebView 里拿地理位置要额外授权，不如用原生 geolocator 拿 WGS-84，
+  # 再用 coord.dart 的同一套公式转 GCJ-02（转换不消耗高德配额）。
+  geolocator: ^14.1.1
 
 dev_dependencies:
   flutter_test:

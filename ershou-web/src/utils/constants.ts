@@ -1,6 +1,7 @@
-/** 默认学校 / 校区（学生端暂未做学校选择页，登录时使用默认值） */
+/** 默认学校 / 校区（学生端暂未做学校选择页，登录时使用默认值）
+ *  campus 2 = 桂林电子科技大学 花江校区（主校区）；1=金鸡岭校区 3=六合路校区，见 sql/migration-guet.sql */
 export const DEFAULT_SCHOOL_ID = 1
-export const DEFAULT_CAMPUS_ID = 1
+export const DEFAULT_CAMPUS_ID = 2
 
 /** 开发环境固定验证码（后端在 dev profile 下固定下发/接受 123456） */
 export const DEV_SMS_CODE = '123456'

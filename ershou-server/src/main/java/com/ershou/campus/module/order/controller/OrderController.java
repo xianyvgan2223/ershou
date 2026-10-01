@@ -5,6 +5,7 @@ import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.Result;
 import com.ershou.campus.module.order.dto.CreateOrderDTO;
 import com.ershou.campus.module.order.dto.OrderActionDTO;
+import com.ershou.campus.module.order.dto.UpdatePointDTO;
 import com.ershou.campus.module.order.service.OrderService;
 import com.ershou.campus.module.order.vo.OrderVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -70,6 +71,12 @@ public class OrderController {
     public Result<Void> cancel(@PathVariable Long id, @RequestBody(required = false) OrderActionDTO dto) {
         orderService.cancel(id, StpUtil.getLoginIdAsLong(), dto == null ? null : dto.getReason());
         return Result.ok();
+    }
+
+    @Operation(summary = "改面交地点（买卖双方都能改，可选同时改时间窗；改完私聊通知对方）")
+    @PatchMapping("/{id}/point")
+    public Result<OrderVO> updatePoint(@PathVariable Long id, @Valid @RequestBody UpdatePointDTO dto) {
+        return Result.ok(orderService.updatePoint(id, StpUtil.getLoginIdAsLong(), dto));
     }
 
     @Operation(summary = "确认成交（卖家点一次即完成；买家确认只留痕）")

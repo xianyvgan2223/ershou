@@ -6,6 +6,7 @@ import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
+import com.ershou.campus.module.map.service.TradePointService;
 import com.ershou.campus.module.order.entity.MeetupOrder;
 import com.ershou.campus.module.order.mapper.MeetupOrderMapper;
 import com.ershou.campus.module.search.service.ItemIndexService;
@@ -31,6 +32,7 @@ public class ScheduledTasks {
     private final ItemMapper itemMapper;
     private final MeetupOrderMapper orderMapper;
     private final ItemIndexService itemIndexService;
+    private final TradePointService tradePointService;
     private final StringRedisTemplate redis;
     private final CacheEvictor evictor;
 
@@ -183,6 +185,24 @@ public class ScheduledTasks {
         // 缓存里的 viewCount 现在偏低，直接删掉让下次读回源取最新值
         TxHooks.afterCommit(() -> evictor.items(flushed));
         log.info("[task][view-flush] 回写 {} 件商品浏览量（合计 {} 次）", flushed.size(), total);
+    }
+
+    /**
+     * 每天 03:10：清理"没有商品"的面交点。
+     *
+     * <p>地图上只应该出现"真的有东西可看"的点位。商品下架/售出后点位会空掉，
+     * 攒着不删地图就会越来越像荒地（用户反馈过：一堆 0 件的点位）。
+     *
+     * <p>规则见 {@link TradePointService#cleanupEmptyPoints()}：点位上没有任何
+     * "还有戏"的商品（草稿/审核中/在售/已锁定），且点位创建超过 7 天才删 ——
+     * 刚新建的点位给足时间挂商品。
+     */
+    @Scheduled(cron = "0 10 3 * * ?")
+    public void cleanupEmptyTradePoints() {
+        int removed = tradePointService.cleanupEmptyPoints();
+        if (removed > 0) {
+            log.info("[task][cleanup-point] 清理 {} 个没有商品的点位", removed);
+        }
     }
 
     private static Long parseLong(String raw) {
