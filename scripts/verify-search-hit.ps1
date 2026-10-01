@@ -83,6 +83,19 @@ try {
   $list = @((Invoke-RestMethod -Uri "$base/trade-points?campusId=2").data)
   Check '列表能看到自建点位（免审核）' (@($list | Where-Object { $_.id -eq $mine.data.id }).Count -eq 1) '未出现'
   Check '列表**看不到**没挂商品的搜索落库点位（不刷屏）' (@($list | Where-Object { $_.id -eq $first.data.id }).Count -eq 0) '出现了'
+  Write-Host ''
+  Write-Host '=== 4.5 地图接口只画"有商品"的点位（发布页列表要保留空的）===' -ForegroundColor Cyan
+  # 造一个 0 商品的用户自建点位：/trade-points 必须能看到它，/map/points 必须看不到
+  $empty = Post "$base/trade-points" @{ campusId = 2; name = $userName + '空点位'; lng = 110.4161; lat = 25.3171 } $t
+  Check '准备：0 商品的自建点位已建' ($empty.code -eq 0) ($empty | ConvertTo-Json -Compress)
+  $after = @((Invoke-RestMethod -Uri "$base/trade-points?campusId=2").data)
+  Check '发布页列表**保留** 0 商品的点位（否则刚建的点选不到）' `
+    (@($after | Where-Object { $_.id -eq $empty.data.id }).Count -eq 1) '被过滤了'
+  $mapPts = @((Invoke-RestMethod -Uri "$base/map/points?campusId=2").data.points)
+  Check '地图**不显示** 0 商品的点位' `
+    (@($mapPts | Where-Object { $_.id -eq $empty.data.id }).Count -eq 0) '出现在地图上了'
+  Check '地图里每个点位的在售数都 > 0' `
+    (@($mapPts | Where-Object { $_.itemCount -le 0 }).Count -eq 0) '有 0 件的点位'
 
   Write-Host ''
   Write-Host '=== 5. 搜索落库点位的 safetyScore 更低（不是推荐面交点）===' -ForegroundColor Cyan
@@ -98,7 +111,7 @@ finally {
   Start-Sleep -Seconds 2
   $c = Get-NetTCPConnection -State Listen -LocalPort 8081 -ErrorAction SilentlyContinue
   if ($c) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }
-  Sql1 "DELETE FROM trade_point WHERE name IN ('$searchName','$userName');" | Out-Null
+  Sql1 "DELETE FROM trade_point WHERE name IN ('$searchName','$userName') OR name LIKE CONCAT('$userName','%');" | Out-Null
   Write-Host '已清理测试点位' -ForegroundColor DarkGray
 }
 

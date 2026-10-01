@@ -176,22 +176,60 @@ public class ChatService {
     /** 未读汇总：顶栏红点读 Redis 快照，快照不存在时回源 DB 并回填 */
     public Map<String, Object> unread(Long userId) {
         Map<String, Integer> bySession = new LinkedHashMap<>();
+        // 无论缓存有没有命中，都要查一次"我的会话"——DB 是权威，
+        // 而且要用它剔除缓存里的**僵尸会话**（见下）。
+        List<ChatSession> sessions = sessionMapper.selectList(Wrappers.<ChatSession>lambdaQuery()
+                .and(w -> w.eq(ChatSession::getUserA, userId).or().eq(ChatSession::getUserB, userId)));
+        Map<Long, ChatSession> byId = sessions.stream()
+                .collect(Collectors.toMap(ChatSession::getId, s -> s, (a, b) -> a));
+
         Map<Object, Object> cached = Map.of();
         try {
             cached = redis.opsForHash().entries(RedisKeys.chatUnread(userId));
         } catch (Exception e) {
             log.warn("[chat][unread][{}] 读取 Redis 快照失败，回源 DB：{}", userId, e.getMessage());
         }
+
+        // ⚠️ 这里踩过一个真 bug：原来是"缓存非空就直接用缓存"，
+        // 于是**被删掉的会话在 Hash 里留下僵尸字段**，未读数只增不减
+        // （实测出现"红点一直显示 11、但库里未读其实是 0"）。
+        // 现在以 DB 的会话集合为准：只采纳仍然存在的会话；顺带把过期字段清掉、用 DB 值校准。
         if (cached.isEmpty()) {
-            List<ChatSession> sessions = sessionMapper.selectList(Wrappers.<ChatSession>lambdaQuery()
-                    .and(w -> w.eq(ChatSession::getUserA, userId).or().eq(ChatSession::getUserB, userId)));
             syncUnreadCache(userId, sessions);
             for (ChatSession s : sessions) {
                 bySession.put(String.valueOf(s.getId()), s.unreadOf(userId));
             }
         } else {
-            cached.forEach((k, v) -> bySession.put(String.valueOf(k), parseInt(v)));
+            Set<Object> stale = new HashSet<>();
+            cached.forEach((k, v) -> {
+                long sid;
+                try {
+                    sid = Long.parseLong(String.valueOf(k));
+                } catch (NumberFormatException e) {
+                    stale.add(k);
+                    return;
+                }
+                ChatSession s = byId.get(sid);
+                if (s == null) {
+                    stale.add(k); // 会话已被删除：清掉这个僵尸字段，不要计入未读
+                    return;
+                }
+                bySession.put(String.valueOf(sid), s.unreadOf(userId));
+            });
+            if (!stale.isEmpty()) {
+                try {
+                    redis.opsForHash().delete(RedisKeys.chatUnread(userId), stale.toArray());
+                    log.info("[chat][unread][{}] 清掉 {} 个已删除会话的僵尸未读字段", userId, stale.size());
+                } catch (Exception e) {
+                    log.warn("[chat][unread][{}] 清理僵尸未读字段失败：{}", userId, e.getMessage());
+                }
+            }
+            // 缓存里没见过的会话（新建但还没同步）补上
+            for (ChatSession s : sessions) {
+                bySession.putIfAbsent(String.valueOf(s.getId()), s.unreadOf(userId));
+            }
         }
+
         int total = bySession.values().stream().mapToInt(Integer::intValue).sum();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("total", total);
@@ -528,16 +566,5 @@ public class ChatService {
 
     private static int nz(Integer value) {
         return value == null ? 0 : value;
-    }
-
-    private static int parseInt(Object raw) {
-        if (raw == null) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(String.valueOf(raw).trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 }

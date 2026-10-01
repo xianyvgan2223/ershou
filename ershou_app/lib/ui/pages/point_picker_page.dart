@@ -9,16 +9,27 @@ import '../../data/api_repository2.dart';
 import '../../data/models2.dart';
 import '../theme/app_theme.dart';
 
-/// 地图选点：在真实高德地图上点一下，识别出附近地名，直接建成一个面交点。
+/// 地图选点页，两种用法（同一套界面，避免两份重复代码）：
 ///
-/// 与 Web 端 `PointPickerDialog` 是同一套交互（地图选点 → 列出候选 → 手填/点选名称），
-/// 但移动端走的是 WebView + 服务端 `/map/regeo`，不把高德 key 打进 App。
+/// 1. **新建点位**（发布页「地图上选」）：点地图 → 识别地名 → `POST /trade-points` 建新点；
+/// 2. **选已有点位**（私聊页「改面交地点」）：点地图上的气泡直接选现成的点位，也能顺手新建。
 ///
-/// 成功后 `pop` 出新建的点位（`MapPoint`），由发布页接收并选中。
+/// 两种用法都 `pop` 出一个 `MapPoint`，调用方按 `id` 用即可。
 class PointPickerPage extends ConsumerStatefulWidget {
-  const PointPickerPage({super.key, this.campusId});
+  const PointPickerPage({
+    super.key,
+    this.campusId,
+    this.pickExisting = false,
+    this.title,
+  });
 
   final int? campusId;
+
+  /// true = 允许"点气泡选已有点位"（私聊改地址用）；
+  /// false = 只新建（发布页用，那里要的就是一个精确的新地址）
+  final bool pickExisting;
+
+  final String? title;
 
   @override
   ConsumerState<PointPickerPage> createState() => _PointPickerPageState();
@@ -37,11 +48,15 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
   String? _error;
   /// 用户是否手动改过名称（改过就不再被自动识别覆盖）
   bool _nameTouched = false;
+  /// 地图上已选中的现成点位（pickExisting 模式下点气泡得到）
+  MapPoint? _pickedExisting;
+  /// 地图上的点位数据，按 id 索引（点气泡时取出精确点位）
+  Map<int, MapPoint> _pointsById = const {};
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initWeb());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 
   @override
@@ -49,6 +64,27 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
     _name.dispose();
     _guide.dispose();
     super.dispose();
+  }
+
+  Future<void> _init() async {
+    // 先拿点位（选已有点位时要用），再建 WebView：顺序反了页面就收不到合并数据
+    await _loadPoints();
+    if (!mounted) return;
+    _initWeb();
+  }
+
+  Future<void> _loadPoints() async {
+    try {
+      final data = await ref.read(mapRepositoryProvider).points(
+            campusId: widget.campusId ?? MapRepository.defaultCampusId,
+          );
+      if (!mounted) return;
+      setState(() {
+        _pointsById = {for (final p in data.points) p.id: p};
+      });
+    } catch (_) {
+      // 拿不到点位不影响"自己点一个位置新建"
+    }
   }
 
   void _initWeb() {
@@ -73,7 +109,26 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
     } catch (_) {
       return;
     }
-    if (payload['type'] != 'pick') return;
+    final type = payload['type'];
+    // 点已有气泡：直接选中那个点位（只在"选已有点位"模式下有意义）
+    if (type == 'select') {
+      if (!widget.pickExisting) return;
+      final id = payload['pointId'];
+      if (id is! int) return;
+      final hit = _pointsById[id];
+      if (hit == null) return;
+      setState(() {
+        _pickedExisting = hit;
+        // 选已有的就把"新建"的输入清掉，避免两种状态混在一起
+        _lng = null;
+        _lat = null;
+        _name.text = '';
+        _candidates = const [];
+        _error = null;
+      });
+      return;
+    }
+    if (type != 'pick') return;
     final lng = (payload['lng'] as num?)?.toDouble();
     final lat = (payload['lat'] as num?)?.toDouble();
     if (lng == null || lat == null) return;
@@ -88,7 +143,7 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
     _onPicked(lng, lat, candidates);
   }
 
-  /// 点地图后：候选地名已经跟着回传，直接列出来让用户挑
+  /// 点地图空白处：准备**新建**一个点位（候选地名已经跟着回传）
   Future<void> _onPicked(double lng, double lat, List<GeoCandidate> candidates) async {
     setState(() {
       _lng = lng;
@@ -96,6 +151,7 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
       _candidates = candidates;
       _locating = false;
       _error = null;
+      _pickedExisting = null; // 从"选已有"切回"新建"
       // 没手填过就用最近的一个候选自动填上，用户可随时改
       if ((!_nameTouched || _name.text.trim().isEmpty) && candidates.isNotEmpty) {
         _name.text = candidates.first.name;
@@ -162,18 +218,21 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final picked = _lng != null && _lat != null;
+    final existing = _pickedExisting;
+    final pickedNew = _lng != null && _lat != null;
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('在地图上选点'),
+        title: Text(widget.title ?? (widget.pickExisting ? '选面交地点' : '在地图上选点')),
         actions: [
           TextButton(
-            onPressed: _saving || !picked ? null : _save,
+            onPressed: _saving || (!pickedNew && existing == null)
+                ? null
+                : () => existing != null ? Navigator.of(context).pop(existing) : _save(),
             child: _saving
                 ? const SizedBox(
                     width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('添加'),
+                : Text(existing != null ? '就用这个' : '添加'),
           ),
         ],
       ),
@@ -198,24 +257,26 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
                       color: Colors.black.withValues(alpha: 0.62),
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: const Text(
-                      '点击地图上你要面交的位置',
+                    child: Text(
+                      widget.pickExisting
+                          ? '点地图上的气泡选个现成的，或点空白处新建一个'
+                          : '点击地图上你要面交的位置',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white, fontSize: 12.5),
+                      style: const TextStyle(color: Colors.white, fontSize: 12.5),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          _sheet(picked),
+          _sheet(existing, pickedNew),
         ],
       ),
     );
   }
 
-  /// 底部表单：坐标 → 名称（+ 候选）→ 类型/指引
-  Widget _sheet(bool picked) {
+  /// 底部表单：选中现成点位 → 一行确认；点空白处 → 新建表单
+  Widget _sheet(MapPoint? existing, bool pickedNew) {
     return Container(
       color: Colors.white,
       padding: EdgeInsets.only(
@@ -228,12 +289,40 @@ class _PointPickerPageState extends ConsumerState<PointPickerPage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!picked)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 14),
+          // 选中了现成点位：只显示它，点右上角「就用这个」即可
+          if (existing != null) ...[
+            Row(
+              children: [
+                const Icon(Icons.place, size: 17, color: AppColors.brandDark),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    existing.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.brandDark),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [
+                MapPoint.typeLabel(existing.type),
+                if (existing.itemCount > 0) '${existing.itemCount} 件在售' else '暂无在售',
+                if (existing.guideText.isNotEmpty) existing.guideText,
+              ].join(' · '),
+              style: const TextStyle(fontSize: 12, color: AppColors.inkSoft, height: 1.5),
+            ),
+          ] else if (!pickedNew)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
               child: Text(
-                '还没选位置。点上面的地图任意位置即可，能自动识别出附近的地名。',
-                style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.6),
+                widget.pickExisting
+                    ? '点地图上的气泡可以选现成的点位；点空白处则新建一个。'
+                    : '还没选位置。点上面的地图任意位置即可，能自动识别出附近的地名。',
+                style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.6),
               ),
             )
           else ...[

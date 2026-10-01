@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>地图组件预览（只看气泡与合并角标）</title>
+  </head>
+  <body>
+    <div id="app" style="height: 100vh"></div>
+    <script type="module">
+      // 开发用预览页：直接挂 AmapCampusMap，方便截图核对气泡 / 合并角标 / 标签的位置。
+      // 用法： http://localhost:5173/map-shot.html
+      // 必须照 main.ts 的初始化（Pinia + 项目样式），否则 CSS 变量缺失会难看甚至空白。
+      import { createApp, h, ref } from 'vue'
+      import { createPinia } from 'pinia'
+      import '/src/styles/main.scss'
+      import AmapCampusMap from '/src/components/AmapCampusMap.vue'
+      import { groupPointsByDistance } from '/src/utils/pointMerge'
+
+      const CAMPUS_ID = 2
+      // 用**全部点位**（/trade-points，含 0 商品的）来构造数据：
+      // 地图实际用的是 /map/points（只含有商品的），但那样两两距离都超 100 米、
+      // 看不到合并角标。这里刻意用全集，好把"角标贴不贴在气泡上"验出来。
+      const all = await fetch(`/api/v1/trade-points?campusId=${CAMPUS_ID}`).then((r) => r.json())
+      const mapData = await fetch(`/api/v1/map/points?campusId=${CAMPUS_ID}`).then((r) => r.json())
+      const raw = (all?.data ?? []).map((p) => ({
+        ...p,
+        itemCount: (mapData?.data?.points ?? []).find((m) => m.id === p.id)?.itemCount ?? 0,
+        minPrice: 0,
+      }))
+      // 与 MapView 同一条链：先按 100 米分组，再把代表点 + 组内个数交给地图
+      const groups = groupPointsByDistance(raw, 100)
+      const points = groups.map((g) => g.rep)
+      const groupCounts = Object.fromEntries(groups.map((g) => [g.rep.id, g.members.length]))
+      // 为了看出"选中态"，把第一个合并组的代表点设为选中，并打开标签
+      const merged = groups.find((g) => g.members.length > 1)
+      const selectedId = ref(merged ? merged.rep.id : (points[0]?.id ?? null))
+
+      createApp({
+        render: () =>
+          h(AmapCampusMap, {
+            points,
+            mapConfig: mapData?.data?.mapConfig ?? null,
+            groupCounts,
+            selectedId: selectedId.value,
+            showFitButton: true,
+            showLabel: true,
+            style: 'height:100vh',
+          }),
+      })
+        .use(createPinia())
+        .mount('#app')
+    </script>
+  </body>
+</html>

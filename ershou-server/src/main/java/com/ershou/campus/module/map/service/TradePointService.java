@@ -139,17 +139,35 @@ public class TradePointService {
      * 搜索落库、又一直没被用上的点位，会由 {@link #cleanupEmptyPoints()} 在宽限期后回收。
      */
     public List<TradePoint> listByCampus(Long campusId) {
+        return listByCampus(campusId, false);
+    }
+
+    /**
+     * @param onlyWithItems 地图场景传 true：**没商品的点位一个都不画**（地图是用来"找货"的，
+     *                      一堆 0 件气泡纯属干扰）。发布页必须传 false —— 那里要能选到
+     *                      "刚建好还没挂商品"的点位，过滤了用户就选不到自己刚建的点。
+     *                      搜索落库（source=3）的点位无论哪个开关都要挂了商品才出现。
+     */
+    public List<TradePoint> listByCampus(Long campusId, boolean onlyWithItems) {
         List<TradePoint> all = pointMapper.selectList(Wrappers.<TradePoint>lambdaQuery()
                 .eq(TradePoint::getCampusId, campusId)
                 .eq(TradePoint::getStatus, 1)
                 .orderByDesc(TradePoint::getSafetyScore));
         Set<Long> usedPointIds = activeItemsByPoint(campusId).keySet();
         return all.stream()
-                .filter(p -> !isSearchHit(p) || usedPointIds.contains(p.getId()))
+                .filter(p -> {
+                    boolean hasItems = usedPointIds.contains(p.getId());
+                    // 搜过没用上的地名：任何场景都不显示
+                    if (isSearchHit(p) && !hasItems) {
+                        return false;
+                    }
+                    // 地图场景：没商品的一律不画
+                    return !onlyWithItems || hasItems;
+                })
                 .toList();
     }
 
-    /** 地图页数据：底图配置 + 点位 + 每个点位的在售商品数/最低价 */
+    /** 地图页数据：底图配置 + 点位 + 每个点位的在售商品数/最低价。**不含 0 商品的点位。** */
     public MapDataVO mapData(Long campusId) {
         var campus = dict.campus(campusId);
         if (campus == null) {
@@ -164,22 +182,34 @@ public class TradePointService {
                 vo.setMapConfig(null);
             }
         }
-        vo.setPoints(cachedPoints(campusId));
+        // 地图只画有商品的点位（找货用），所以走"可见"那份缓存
+        vo.setPoints(cachedPoints(campusId, true));
         return vo;
     }
 
+    /** 点位列表（发布页/私聊选点用）：**保留 0 商品的点位**，否则用户刚建的点选不到 */
     public List<TradePointVO> list(Long campusId) {
-        return cachedPoints(campusId);
+        return cachedPoints(campusId, false);
     }
 
     /**
      * 点位 + 在售数 / 最低价：整校区的在售商品聚合，原本每次请求都要把全校区在售商品捞进内存。
      * 缓存 key 带版本号（{@link CacheEvictor#mapVersion()}），商品写路径自增版本号即整体失效。
+     *
+     * <p>⚠️ **两种可见性必须用两个 key**：地图（只画有商品的）与发布页（要含 0 商品的）
+     * 结果不同，共用一份缓存会导致"地图上又冒出空气泡"（或反过来发布页选不到新点）。
      */
     private List<TradePointVO> cachedPoints(Long campusId) {
-        String key = RedisKeys.mapPoints(campusId, evictor.mapVersion());
+        return cachedPoints(campusId, false);
+    }
+
+    private List<TradePointVO> cachedPoints(Long campusId, boolean onlyWithItems) {
+        long version = evictor.mapVersion();
+        String key = onlyWithItems
+                ? RedisKeys.mapPointsWithItems(campusId, version)
+                : RedisKeys.mapPoints(campusId, version);
         return cache.getOrLoad(key, cacheProps.getMapPointsTtl(), POINT_LIST,
-                () -> withItemCount(listByCampus(campusId), campusId));
+                () -> withItemCount(listByCampus(campusId, onlyWithItems), campusId));
     }
 
     /**

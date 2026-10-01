@@ -14,6 +14,7 @@ import '../../data/models2.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
+import 'point_picker_page.dart';
 
 /// 聊天窗：本地缓存先渲染 → 网络刷新 → WS 事件增量更新。
 ///
@@ -43,6 +44,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   StreamSubscription<bool>? _statusSub;
   Timer? _poll;
   List<String> _quickReplies = const [];
+  /// 这件商品上"进行中"的面交单（有就显示交易卡片）
+  MeetupOrder? _order;
 
   late final ChatDraftsNotifier _drafts;
   late final ActiveChatSessionNotifier _activeSession;
@@ -70,6 +73,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       await _loadFromCache();
       await _load();
       await _loadQuickReplies();
+      // 交易卡片：这件商品上有进行中的单子就显示出来（改地点/接受/我收到了都在里面）
+      await _loadOrder();
       _startPolling();
     });
   }
@@ -534,6 +539,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       body: Column(
         children: [
           if (s.itemTitle.isNotEmpty) _itemBanner(s),
+          // 交易卡片：这一件商品上"进行中"的面交单（Web 端的交易卡片搬过来）
+          if (_order != null) _tradeCard(_order!, s),
           if (s.blockedByMe || s.blockedByPeer || !s.canSend) _blockedBanner(s),
           if (_fromCache && !_online) _cacheBanner(),
           Expanded(child: _messageList(peerRead)),
@@ -542,6 +549,213 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         ],
       ),
     );
+  }
+
+  /// 交易卡片：状态 + 面交地点 + 就地改地址 / 接受 / 拒绝 / 我收到了
+  ///
+  /// 与 Web 端 ChatView 的交易卡片同一套动作，只是布局按手机来（一行一行堆）。
+  Widget _tradeCard(MeetupOrder order, ChatSession s) {
+    // 会话自带 myRole（后端按当前登录用户算好的），比自己拿 userId 去比对更稳
+    final iAmSeller = s.myRole == 'seller';
+    // **只有卖家能改面交地点与时间**（后端也做了校验，这里是让买家连入口都看不到）
+    final canEditPoint = iAmSeller && (order.status == 1 || order.status == 2);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              TagChip(
+                text: order.statusText.isEmpty
+                    ? (iAmSeller ? '待你确认' : '等待卖家确认')
+                    : order.statusText,
+                color: AppColors.brandDark,
+                background: AppColors.brandSoft,
+              ),
+              const Spacer(),
+              Text(
+                '￥' + Fmt.price(order.dealPrice),
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.price),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.place_outlined, size: 14, color: AppColors.inkSoft),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  order.pointName.isEmpty ? '面交地点待协商' : order.pointName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
+                ),
+              ),
+              if (canEditPoint)
+                TextButton(
+                  onPressed: () => _changePoint(order),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    order.pointName.isEmpty ? '约定地点' : '改地点',
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                ),
+            ],
+          ),
+          if (order.timeSlotStart.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule, size: 13, color: AppColors.inkFaint),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${order.timeSlotStart} ~ ${order.timeSlotEnd}',
+                    style: const TextStyle(fontSize: 11.5, color: AppColors.inkFaint),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
+          // 动作按钮：按角色给（卖家接受/拒绝/已卖出，买家我收到了）
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (iAmSeller && order.status == 1) ...[
+                TextButton(
+                  onPressed: () => _rejectOrder(order),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.inkSoft,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('拒绝', style: TextStyle(fontSize: 13)),
+                ),
+                const SizedBox(width: 6),
+                FilledButton(
+                  onPressed: () => _acceptOrder(order),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  child: const Text('接受并锁定'),
+                ),
+              ],
+              if (iAmSeller && order.status == 2)
+                FilledButton(
+                  onPressed: () => _soldOrder(order),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  child: const Text('已卖出'),
+                ),
+              if (!iAmSeller && order.status == 2)
+                FilledButton(
+                  onPressed: () => _receivedOrder(order),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  child: const Text('我收到了'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 改面交地点：选点页支持"点气泡选现成的 + 点空白新建"，两边都在本校区内
+  Future<void> _changePoint(MeetupOrder order) async {
+    final picked = await Navigator.of(context).push<MapPoint>(
+      MaterialPageRoute<MapPoint>(
+        builder: (_) => const PointPickerPage(pickExisting: true, title: '改面交地点'),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await ref.read(orderRepositoryProvider).updatePoint(order.id, picked.id);
+      if (!mounted) return;
+      showToast(context, '面交地点已改成「${picked.name}」，对方会收到提醒');
+      await _loadOrder();
+    } catch (e) {
+      if (mounted) showToast(context, '改地点失败：$e');
+    }
+  }
+
+  Future<void> _acceptOrder(MeetupOrder order) async {
+    try {
+      await ref.read(orderRepositoryProvider).accept(order.id);
+      if (!mounted) return;
+      showToast(context, '已接受，商品已为你锁定');
+      await _loadOrder();
+    } catch (e) {
+      if (mounted) showToast(context, '接受失败：$e');
+    }
+  }
+
+  Future<void> _rejectOrder(MeetupOrder order) async {
+    try {
+      await ref.read(orderRepositoryProvider).reject(order.id, '时间不合适');
+      if (!mounted) return;
+      showToast(context, '已拒绝这单');
+      await _loadOrder();
+    } catch (e) {
+      if (mounted) showToast(context, '拒绝失败：$e');
+    }
+  }
+
+  Future<void> _soldOrder(MeetupOrder order) async {
+    try {
+      await ref.read(orderRepositoryProvider).confirmOrder(order.id);
+      if (!mounted) return;
+      showToast(context, '成交！商品已置为已售出');
+      await _loadOrder();
+    } catch (e) {
+      if (mounted) showToast(context, '操作失败：$e');
+    }
+  }
+
+  Future<void> _receivedOrder(MeetupOrder order) async {
+    try {
+      await ref.read(orderRepositoryProvider).confirmOrder(order.id);
+      if (!mounted) return;
+      showToast(context, '已记录"我收到了"');
+      await _loadOrder();
+    } catch (e) {
+      if (mounted) showToast(context, '操作失败：$e');
+    }
+  }
+
+  /// 拉这件商品上"进行中"的面交单（买卖双方都查，谁的单子都能看到）
+  Future<void> _loadOrder() async {
+    final itemId = widget.session.itemId;
+    if (itemId == null || itemId <= 0) return;
+    try {
+      final order = await ref.read(orderRepositoryProvider).activeOrderOfItem(itemId);
+      if (!mounted) return;
+      setState(() => _order = order);
+    } catch (_) {
+      // 没有进行中的单子很正常，不打扰用户
+    }
   }
 
   String _statusText() {
@@ -612,7 +826,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         if (i == 0) return _historyHeader();
         final index = i - 1;
         final m = _messages[index];
-        final showTime = index == 0 || _timeGap(_messages[index - 1], m);
+        final prev = index > 0 ? _messages[index - 1] : null;
+        final next = index + 1 < _messages.length ? _messages[index + 1] : null;
+        final showTime = prev == null || _timeGap(prev, m);
+        // 同一人 + 同一时间组 + 都没撤回 → 视为一组（组内间距收紧、相邻角变方）
+        bool sameGroup(ChatMessage? o) =>
+            o != null &&
+            !o.recalled &&
+            !m.recalled &&
+            o.mine == m.mine &&
+            !_timeGap(o, m);
         return Column(
           children: [
             if (showTime)
@@ -627,6 +850,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               m,
               isLast: index == _messages.length - 1,
               peerRead: peerRead,
+              sameAsPrev: !showTime && sameGroup(prev),
+              sameAsNext: sameGroup(next),
             ),
           ],
         );
@@ -662,7 +887,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     return b.difference(a).inMinutes.abs() >= 5;
   }
 
-  Widget _bubble(ChatMessage m, {required bool isLast, required bool peerRead}) {
+  /// 消息气泡。
+  ///
+  /// 手机 IM 的常规做法：**同一个人连续发的消息聚成一组**（组内间距收紧、相邻角变方），
+  /// 换人或隔了一段时间才拉开间距。原来每条固定 `bottom:10`，
+  /// 连续几条消息散成一串，看着很松散、也不容易看出"这是一个人连着说的"。
+  Widget _bubble(
+    ChatMessage m, {
+    required bool isLast,
+    required bool peerRead,
+    bool sameAsPrev = false,
+    bool sameAsNext = false,
+  }) {
     final mine = m.mine;
     if (m.recalled) {
       return Padding(
@@ -675,6 +911,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         ),
       );
     }
+    // 组内相邻的角收小，成组时看起来是"一坨"而不是一串独立的球
+    final r = Radius.circular(12);
+    final rSmall = Radius.circular(sameAsPrev || sameAsNext ? 5 : 12);
     final bubble = Container(
       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.66),
       padding: m.isImage
@@ -682,10 +921,26 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           : const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: mine ? AppColors.brand : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.only(
+          topLeft: sameAsPrev && !mine ? rSmall : r,
+          topRight: sameAsPrev && mine ? rSmall : r,
+          bottomLeft: sameAsNext && !mine ? rSmall : r,
+          bottomRight: sameAsNext && mine ? rSmall : r,
+        ),
       ),
+      // 图片气泡：固定 1:1 方框 + BoxFit.cover，避免非方图被拉伸；
+      // 失败时 NetImage 自己会退化成一个浅灰占位（不会再出现绿边空框）
       child: m.isImage
-          ? NetImage(url: m.content, width: 150, height: 150, radius: 9)
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: NetImage(
+                url: m.content,
+                width: 150,
+                height: 150,
+                radius: 0,
+                fit: BoxFit.cover,
+              ),
+            )
           : Text(
               m.content,
               style: TextStyle(
@@ -731,9 +986,11 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         ),
       ],
     );
-    if (!mine) return Padding(padding: const EdgeInsets.only(bottom: 10), child: child);
+    // 组内间距收紧到 3，出组（换人 / 超时）才拉开到 10
+    final gap = sameAsNext ? 3.0 : 10.0;
+    if (!mine) return Padding(padding: EdgeInsets.only(bottom: gap), child: child);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: gap),
       child: GestureDetector(
         onLongPress: _canRecall(m) ? () => _recall(m) : null,
         onTap: m.localStatus == 'failed' ? () => _retry(m) : null,

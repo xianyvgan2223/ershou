@@ -185,9 +185,14 @@ function bubbleHtml(point: MapPoint): string {
     ? `<span class="amap-campus__label">${escapeHtml(point.name)}</span>`
     : ''
   const badge = memberCount > 1 ? `<i class="amap-campus__merged">${memberCount}</i>` : ''
+  // ⚠️ 角标必须锚在**气泡**上，所以要给气泡单独套一层 relative 的 .amap-campus__pin。
+  // 直接挂在 .amap-campus__marker 上会飘走：那个容器是 flex-column 且含名称标签，
+  // 宽度被标签撑大、top 又对着标签上方 —— 角标会跑到标签右上角、离气泡很远（踩过）。
   return `<div class="amap-campus__marker" data-point-id="${point.id}">
-      <span class="${classNames.join(' ')}">${point.itemCount ?? 0}</span>
-      ${badge}
+      <span class="amap-campus__pin">
+        <span class="${classNames.join(' ')}">${point.itemCount ?? 0}</span>
+        ${badge}
+      </span>
       ${label}
     </div>`
 }
@@ -707,14 +712,24 @@ watch(pickable, (value) => {
     cursor: pointer;
   }
 
+  // 气泡的定位锚：角标（合并个数）相对它定位，这样才紧贴气泡右上角。
+  // 不能用外面的 .amap-campus__marker 当锚 —— 它是 flex-column 且含名称标签，
+  // 宽度会被标签撑大（角标于是飘到标签右上角）。
+  :deep(.amap-campus__pin) {
+    position: relative;
+    display: inline-flex;
+  }
+
   // 合并出来的气泡：右上角一个"N"角标，提示"这里其实有 N 个点位"
   :deep(.amap-campus__merged) {
     position: absolute;
-    top: -4px;
-    right: -4px;
+    top: -5px;
+    right: -5px;
+    z-index: 2;
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
+    box-sizing: border-box;
     border: 1.5px solid #fff;
     border-radius: 999px;
     background: #7c3aed;

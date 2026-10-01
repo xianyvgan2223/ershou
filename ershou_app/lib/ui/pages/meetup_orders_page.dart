@@ -247,7 +247,7 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
     if (isBuyer && o.status == 2) {
       buttons.add(FilledButton(
         onPressed: () => _act(
-          () => ref.read(orderRepositoryProvider).buyerReceived(o.id),
+          () => ref.read(orderRepositoryProvider).confirmOrder(o.id),
           '已确认收到，等卖家确认卖出',
         ),
         style: FilledButton.styleFrom(minimumSize: const Size(96, 36)),
@@ -257,7 +257,7 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
     if (!isBuyer && o.status == 2) {
       buttons.add(FilledButton(
         onPressed: () => _act(
-          () => ref.read(orderRepositoryProvider).sellerSold(o.id),
+          () => ref.read(orderRepositoryProvider).confirmOrder(o.id),
           '已成交，信用分 +2',
         ),
         style: FilledButton.styleFrom(minimumSize: const Size(110, 36)),

@@ -473,6 +473,45 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 | 基础 LBS（逆地理/路径规划） | 15 万次 | 选点时的逆地理编码，只在一次用户动作里调 |
 | 基础搜索（POI/输入提示） | **5000 次** | ⚠️ 极紧，**靠"先数据库、后高德"压住**（见下） |
 
+**移动端（Flutter `ershou_app`）怎么接的高德**
+
+| 项 | 做法 |
+| --- | --- |
+| 真地图 | **WebView 承载高德 JS API**，页面由后端下发：`GET /api/v1/map/amap-html?campusId=&pickable=&focusPointId=&wantRegeo=&mapPoints=` |
+| key | **不打进 App、用户也不用手输**：后端把 `ershou.amap.js-key` 注入页面再下发，换 key 不用发版 |
+| 事件回传 | 页面通过 `FlutterBridge` 回传 `ready / select / pick`；Flutter 用 `runJavaScript` 调 `__ershouCenter / __ershouLocate / __ershouFocus` |
+| 逆地理编码 | **在页面里用 `AMap.Geocoder` 做**（`wantRegeo=true` 时把候选一起回传）。原因：现有 JS API key 打 `restapi.amap.com` 会被 `USERKEY_PLAT_NOMATCH` 拒绝，用它就不必再申请 Web 服务 key。服务端另留 `/map/regeo` 兜底（读 `ershou.amap.web-key`，没配就返回空） |
+| 定位 | 原生 `geolocator` 拿 WGS-84 → `core/utils/coord.dart` 转 GCJ-02（转换 0 配额） |
+| 附近点位 | 服务端 Redis GEO，0 高德配额 |
+| 100 米合并 | `core/utils/point_merge.dart`，与 Web 端同规则；**只影响展示**，`members` 保留每条精确点位与 id |
+
+> ⚠️ 自定义 marker 的 content 必须自己写 `pointer-events:auto`：AMap 给 marker 外层设了
+> `pointer-events:none`，不加的话**气泡画得出来但完全点不动**（真机排查了很久才定位）。
+
+**发布页 / 私聊页的面交点选择**
+
+- 发布页「地图上选」→ `PointPickerPage(pickExisting: false)`：点地图 → 逆地理编码识别地名 → `POST /trade-points` 建新点 → 回填选中；
+- 排查"点了没反应"的利器：页面把 `ready` 事件带 `count / markerCount / merged` 回传，
+  Flutter debug 下打印每个桥接事件（`debugPrint('[map] ...')`）——一眼能看出"画了几个""事件有没有到"。
+- 私聊页交易卡片「改地点」→ `PointPickerPage(pickExisting: true)`：**点气泡选现成的**（右上角变「就用这个」），点空白处则新建 → `PATCH /meetup-orders/{id}/point`；
+  **只有卖家能改**面交地点与时间（商品在他手上，地点时间由他定；买家想改在私聊里商量）——后端 `updatePoint` 强校验 `sellerId`，前端只是把入口藏掉；
+- 改完对方收到私聊提醒「【面交地点已更新】…」，`reschedule_count` +1。
+
+回归：
+- `node scripts/verify-point-merge-mobile.mjs`（16 项：合并不吞 id/坐标、100 米阈值语义、不链式传递、两端规则一致）
+- `powershell -File scripts/verify-change-meetup-point.ps1`（20 项：买卖双方可改、异校区拒绝、状态限制、提醒送达、未登录 10002、第三方不可改）
+
+> 两个测试都踩过的坑：**私聊内容是加密存储的**（库里是 `v1:xxx` 密文），验证通知必须走接口读明文，
+> 直接 SQL `LIKE '%文字%'` 永远查不到。
+
+**未读角标（`GET /api/v1/chat/unread`）以 DB 为权威**
+
+Redis Hash `ershou:chat:unread:{uid}` 只当快速读取路径，**不做权威**：
+
+- 读取时会拿 DB 的会话集合校验缓存，**剔除已删除会话的僵尸字段**并顺手清掉；
+- 为什么必须这样：会话删掉后 Hash 字段没人清，未读会**只增不减** —— 实测出现"底部角标一直显示 11、库里未读其实是 0"（Redis 里 9 个字段、8 个是已删会话留下的），用户只能重装才能消掉；
+- 回归：`powershell -File scripts/verify-unread-badge.ps1`（14 项，含"删会话后未读立刻归零"）。
+
 **附近点位用 Redis GEO（`GET /api/v1/trade-points/nearby`）**
 
 "我附近有哪些面交点"是最自然的需求之一，所以**刻意不让它依赖高德周边搜索**（5000 次/月）：
@@ -508,7 +547,8 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 
 - 落库时 `trade_point.source = 3`（`1=官方 2=用户提交 3=高德搜索落库`），前端/运营能区分"搜出来的地名"；
 - **同名幂等**：先按"校区 + 名称"查库，已有就复用那条（并把当前用户记成创建者，保证他下次在"我的点位"里能选到），**不会重复插、也不会再调高德**；
-- **不会把地图刷屏**：地图/下拉只显示 `官方 ∪ 用户提交 ∪ (搜索落库且已挂商品)`，所以"搜过但没用于交易"的地名不会出现在地图上；
+- **地图只画有商品的点位**（2026-10-01 起）：`/map/points` 直接把 0 商品的点位滤掉——地图是用来找货的，一堆 0 件气泡纯属干扰。**但 `/trade-points`（发布页/私聊选点）必须保留空的**，否则用户刚建的点位在发布时选不到。两种可见性结果不同，所以后端用了**两个缓存 key**（`ershou:map:points:{campus}:v{ver}` 与 `…:items:v{ver}`），共用一份缓存必然有一边是错的；
+- **搜索落库的点位（source=3）**：无论哪个开关，都要挂了商品才出现，否则搜过的地名会污染列表；
 - **会被回收**：空点位清理任务（每天 03:10）会把"宽限期内没有任何商品"的点位删掉，点位库不会无限膨胀；
 - 安全分给得更低（30 vs 用户自建的 40），这样它不会被面交点推荐算法优先推荐。
 

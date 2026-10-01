@@ -319,13 +319,45 @@ class OrderRepository {
             data: {'reason': reason}),
       );
 
-  Future<void> buyerReceived(int orderId) => _api.envelope<void>(
-        () => _api.dio.post<dynamic>('/meetup-orders/' + orderId.toString() + '/received'),
+  /// 确认成交：**卖家点一次即完成**（商品置已售出、双方信用分 +2）；买家点只留痕，不推进状态。
+  ///
+  /// ⚠️ 移动端原来是 `/sold` 和 `/received` 两个路径，但后端**根本没有这两个接口**
+  /// （只有 `/{id}/confirm`），调用必然 90001。已统一到 `/confirm`。
+  Future<void> confirmOrder(int orderId) => _api.envelope<void>(
+        () => _api.dio.post<dynamic>('/meetup-orders/' + orderId.toString() + '/confirm'),
       );
 
-  Future<void> sellerSold(int orderId) => _api.envelope<void>(
-        () => _api.dio.post<dynamic>('/meetup-orders/' + orderId.toString() + '/sold'),
+  /// 改面交地点（买卖双方都能改，限状态 1 待确认 / 2 待面交）。
+  ///
+  /// 改完后端会给对方发一条私聊提醒，并把 `reschedule_count` +1。
+  /// 只能选**本校区**的点位——所以调用方要传当前校区内的 pointId。
+  Future<void> updatePoint(int orderId, int pointId) => _api.envelope<void>(
+        () => _api.dio.patch<dynamic>(
+          '/meetup-orders/' + orderId.toString() + '/point',
+          data: {'pointId': pointId},
+        ),
       );
+
+  /// 查某件商品下"我还需要处理/进行中"的面交单。
+  ///
+  /// 后端没有"按 itemId 查订单"的接口，这里用买/卖两个角色各查一页再按 itemId 过滤。
+  /// 私聊页要显示交易卡片，但只关心这一件商品的单子，量很小。
+  Future<MeetupOrder?> activeOrderOfItem(int itemId) async {
+    for (final role in const ['buyer', 'seller']) {
+      try {
+        final page = await this.page(role: role, pageSize: 20);
+        for (final order in page.records) {
+          // 1 待卖家确认 / 2 待面交：只有这两个状态允许改地点
+          if (order.itemId == itemId && (order.status == 1 || order.status == 2)) {
+            return order;
+          }
+        }
+      } catch (_) {
+        // 某一个角色查失败不影响另一个
+      }
+    }
+    return null;
+  }
 
   /// 需要我处理的面交单数量，用于「我的」页红点
   Future<int> todoCount() async {

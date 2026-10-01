@@ -67,6 +67,17 @@ public final class RedisKeys {
         return "ershou:map:points:" + campusId + ":v" + version;
     }
 
+    /**
+     * 同上，但**只含"有商品"的点位**（地图展示用，见 TradePointService#listByCampus）。
+     *
+     * <p>为什么要单独一个 key：地图只画有商品的点位（地图是用来找货的），
+     * 而发布页选点必须含 0 商品的点位（不然用户刚建的点位选不到）。
+     * 两种可见性结果不同，共用一份缓存必然有一边是错的。
+     */
+    public static String mapPointsWithItems(Long campusId, long version) {
+        return "ershou:map:points:" + campusId + ":items:v" + version;
+    }
+
     public static String dictCategory(Long categoryId) {
         return "ershou:dict:category:" + categoryId;
     }

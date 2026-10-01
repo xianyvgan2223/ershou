@@ -495,6 +495,11 @@ public class OrderService {
     @Transactional(rollbackFor = Exception.class)
     public OrderVO updatePoint(Long orderId, Long userId, UpdatePointDTO dto) {
         MeetupOrder order = requireOrder(orderId, userId);
+        // **只有卖家能改面交地点与时间**（产品决定）：商品在卖家手上，见面的地点与时间由他定更合理；
+        // 买家想改就在私聊里商量。校验必须在服务端——只藏按钮挡不住直接调接口。
+        if (!Objects.equals(order.getSellerId(), userId)) {
+            throw new BizException(ResultCode.ORDER_NO_PERMISSION, "只有卖家能修改面交地点和时间");
+        }
         if (order.getStatus() == null || (order.getStatus() != 1 && order.getStatus() != 2)) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前状态不能改面交地点");
         }
@@ -527,10 +532,10 @@ public class OrderService {
         update.setRescheduleCount((order.getRescheduleCount() == null ? 0 : order.getRescheduleCount()) + 1);
         orderMapper.updateById(update);
 
-        String actor = Objects.equals(order.getBuyerId(), userId) ? "买家" : "卖家";
+        // 走到这里一定是卖家（上面已校验），文案就不要再按角色猜了
         TxHooks.afterCommit(() -> notifyPeer(order, userId,
                 "【面交地点已更新】《" + order.getItemTitle() + "》\n"
-                        + actor + "把面交点改成了：" + point.getName() + "\n"
+                        + "卖家把面交点改成了：" + point.getName() + "\n"
                         + (StringUtils.hasText(point.getGuideText()) ? "指引：" + point.getGuideText() + "\n" : "")
                         + "时间：" + (changeSlot
                         ? FMT.format(LocalDateTime.parse(dto.getTimeSlotStart(), FMT))

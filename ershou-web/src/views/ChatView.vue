@@ -492,9 +492,11 @@ onMounted(async () => {
               面交点：{{ activeOrder.pointName || '待协商' }}
               · 时间：{{ activeOrder.timeSlotStart ? `${formatDateTime(activeOrder.timeSlotStart)} ~ ${formatDateTime(activeOrder.timeSlotEnd)}` : '待协商' }}
             </span>
-            <!-- 买卖双方都能改地点：校园里哪个门方便是聊出来的，让一侧改不了就只能打字 -->
+            <!-- **只有卖家能改面交地点与时间**（2026-10-01 产品决定）：
+                 商品在卖家手上，见面的地点与时间由他定更合理；买家想改就在私聊里商量。
+                 后端 updatePoint 也做了同样的校验，这里只是把入口藏掉。 -->
             <el-button
-              v-if="activeOrder.status === 1 || activeOrder.status === 2"
+              v-if="isSeller && (activeOrder.status === 1 || activeOrder.status === 2)"
               class="trade__edit"
               size="small"
               text
