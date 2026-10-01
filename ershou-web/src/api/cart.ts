@@ -51,9 +51,19 @@ export interface CheckoutOrder {
   pointName: string
 }
 
+/** 本次结算里因商品不可面交而被跳过的条目（后端只结算能约的，其余回报在这里） */
+export interface CheckoutSkipped {
+  cartId: number
+  itemId: number
+  title: string
+  reason: string
+}
+
 export interface CheckoutResult {
   batchNo: string
   orders: CheckoutOrder[]
+  /** 被跳过的条目：一件坏商品不再拖垮整批结算 */
+  skipped?: CheckoutSkipped[]
 }
 
 export function fetchCart(): Promise<CartSellerGroup[]> {

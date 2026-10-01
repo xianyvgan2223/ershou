@@ -18,7 +18,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { useMeetupStore } from '@/stores/meetup'
-import { fetchCart } from '@/api/cart'
+import { useCartStore } from '@/stores/cart'
 import { nameInitial } from '@/utils/format'
 
 const route = useRoute()
@@ -26,7 +26,9 @@ const router = useRouter()
 const userStore = useUserStore()
 const chatStore = useChatStore()
 const meetupStore = useMeetupStore()
-const cartCount = ref(0)
+// 购物车件数收敛到 store：加入购物车 / 结算后都会 refresh，红点不再"只在挂载时算一次"
+const cartStore = useCartStore()
+const cartCount = computed(() => cartStore.count)
 const searchKeyword = ref('')
 
 const NAV_LINKS = [
@@ -54,16 +56,7 @@ const activeMenu = computed(() => {
 const creditText = computed(() => (userStore.isLogin ? `信用分 ${userStore.creditScore}` : ''))
 
 async function loadCartCount(): Promise<void> {
-  if (!userStore.isLogin) return
-  try {
-    const groups = await fetchCart()
-    cartCount.value = groups.reduce(
-      (sum, group) => sum + group.items.reduce((count, item) => count + item.quantity, 0),
-      0,
-    )
-  } catch {
-    cartCount.value = 0
-  }
+  await cartStore.refresh()
 }
 
 /** 交易类动作（接受/拒绝/成交）之后局部刷新红点，不用等下一轮轮询 */
@@ -90,7 +83,7 @@ async function handleCommand(command: string): Promise<void> {
     chatStore.disconnect()
     meetupStore.reset()
     userStore.logout()
-    cartCount.value = 0
+    cartStore.reset()
     ElMessage.success('已退出登录')
     router.push('/')
     return
@@ -165,11 +158,23 @@ watch(
           >
             <el-icon><component :is="link.icon" /></el-icon>
             <span>{{ link.label }}</span>
-            <em v-if="link.path === '/cart' && cartCount > 0" class="nav__dot">{{ cartCount }}</em>
+            <!-- 购物车件数 / 面交待办：**在对应页面自己不显示**。
+                 这两个数字是"提醒你去那一页处理"用的，人已经站在那一页了还顶着气泡很怪
+                 （用户反馈："点击进入界面后上方的气泡没有消失"）。
+                 「消息」的未读红点保留：一个会话已读不代表别的会话没新消息，在当前页也有意义。 -->
+            <em
+              v-if="link.path === '/cart' && cartCount > 0 && activeMenu !== '/cart'"
+              class="nav__dot"
+            >
+              {{ cartCount }}
+            </em>
             <em v-else-if="link.path === '/chat' && chatStore.unreadTotal > 0" class="nav__dot">
               {{ chatStore.unreadTotal > 99 ? '99+' : chatStore.unreadTotal }}
             </em>
-            <em v-else-if="link.path === '/orders' && meetupStore.todoCount > 0" class="nav__dot">
+            <em
+              v-else-if="link.path === '/orders' && meetupStore.todoCount > 0 && activeMenu !== '/orders'"
+              class="nav__dot"
+            >
               {{ meetupStore.label }}
             </em>
           </router-link>

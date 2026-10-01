@@ -10,6 +10,7 @@ import '../../data/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
+import 'cart_page.dart';
 import 'chat_page.dart';
 
 class ItemDetailPage extends ConsumerStatefulWidget {
@@ -30,6 +31,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   bool _favorited = false;
   bool _favoriteBusy = false;
   bool _meetupBusy = false;
+  /// 加入购物车进行中
+  bool _cartBusy = false;
 
   @override
   void initState() {
@@ -186,6 +189,45 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     }
   }
 
+  /// 加入购物车：可以再挑几件一起"合并面交"。
+  ///
+  /// 后端在加购时就会校验商品能不能约（已锁定 / 已售出 / 自己的商品 / 超库存都会被拒），
+  /// 所以这里只要把错误原文透出来即可，不用自己再判一遍。
+  Future<void> _addToCart() async {
+    final item = _item;
+    if (item == null) return;
+    if (!_loggedIn) {
+      _requireLogin();
+      return;
+    }
+    if (_cartBusy) return;
+    setState(() => _cartBusy = true);
+    try {
+      await ref.read(cartRepositoryProvider).add(item.id);
+      if (!mounted) return;
+      setState(() => _cartBusy = false);
+      // 购物车红点要立刻跟上，否则用户以为没加成功
+      await ref.read(cartCountProvider.notifier).refresh();
+      if (!mounted) return;
+      showToast(context, '已加入购物车，可继续挑几件一起面交');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _cartBusy = false);
+      showToast(context, e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _cartBusy = false);
+      showToast(context, '加入购物车失败：' + e.toString());
+    }
+  }
+
+  Future<void> _openCart() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const CartPage()),
+    );
+    if (mounted) await ref.read(cartCountProvider.notifier).refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = _item;
@@ -219,6 +261,23 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
               backgroundColor: Colors.white,
               surfaceTintColor: Colors.transparent,
               leading: const _CircleBackButton(),
+              // 购物车入口：件数红点跟着走，能直接进购物车合并面交
+              actions: [
+                IconButton(
+                  onPressed: _openCart,
+                  tooltip: '购物车',
+                  icon: Consumer(
+                    builder: (context, ref, _) {
+                      final count = ref.watch(cartCountProvider);
+                      return Badge(
+                        isLabelVisible: count > 0,
+                        label: Text(count > 99 ? '99+' : '$count'),
+                        child: const Icon(Icons.shopping_cart_outlined),
+                      );
+                    },
+                  ),
+                ),
+              ],
               flexibleSpace: FlexibleSpaceBar(
                 background: Stack(
                   fit: StackFit.expand,
@@ -571,7 +630,13 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             color: onSale ? AppColors.inkSoft : AppColors.inkFaint,
             onTap: onSale ? _openChat : () => showToast(context, '商品' + closedText + '，不能再聊了'),
           ),
-          const SizedBox(width: 12),
+          _actionIcon(
+            icon: Icons.add_shopping_cart,
+            label: '加购',
+            color: onSale ? AppColors.inkSoft : AppColors.inkFaint,
+            onTap: onSale ? _addToCart : () => showToast(context, '商品' + closedText + '，不能加入购物车'),
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: FilledButton(
               onPressed: onSale && !_meetupBusy ? _createMeetup : null,

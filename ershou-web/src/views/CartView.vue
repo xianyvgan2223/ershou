@@ -16,6 +16,8 @@ const selectedIds = ref<number[]>([])
 const checkoutVisible = ref(false)
 const resultVisible = ref(false)
 const checkoutResult = ref<CheckoutResult | null>(null)
+/** 本次结算里因商品不可面交而被跳过的条目（后端返回 skipped） */
+const skippedItems = computed(() => checkoutResult.value?.skipped ?? [])
 /** 已经出现过的条目：新加入的自动勾选，老条目的勾选状态尊重用户操作 */
 const knownIds = new Set<number>()
 
@@ -173,7 +175,8 @@ onMounted(loadCart)
         <h2 class="page-title">购物车</h2>
         <p class="page-subtitle">勾选同一面交点、同一时间窗的商品，可一键合并成面交单</p>
       </div>
-      <el-button :icon="Delete" text type="danger" @click="toggleAll(false)">清空选择</el-button>
+      <!-- 只是取消勾选，不是删商品：原来用 Delete 图标 + danger 样式，看着像"清空购物车"，很容易误点 -->
+      <el-button text @click="toggleAll(false)">取消全选</el-button>
     </div>
 
     <div v-loading="loading" class="cart__body">
@@ -265,6 +268,22 @@ onMounted(loadCart)
         批次号：<strong>{{ checkoutResult?.batchNo }}</strong>，共生成
         {{ checkoutResult?.orders?.length ?? 0 }} 张面交单，等待卖家确认。
       </p>
+      <!-- 被跳过的商品要说清楚：以前是一条坏条目让整批结算失败，
+           用户只看到一句"商品已被其他同学约走"，不知道是哪件、也不知道别的能不能买 -->
+      <el-alert
+        v-if="skippedItems.length"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="cart__skipped"
+        title="以下商品已不可面交，本次没有一起提交"
+      >
+        <ul class="cart__skipped-list">
+          <li v-for="row in skippedItems" :key="row.cartId">
+            {{ row.title }} —— {{ row.reason }}
+          </li>
+        </ul>
+      </el-alert>
       <el-table :data="checkoutResult?.orders ?? []" size="small" border>
         <el-table-column prop="orderNo" label="面交单号" min-width="160" />
         <el-table-column prop="pointName" label="面交点" min-width="120" />
@@ -372,6 +391,19 @@ onMounted(loadCart)
   &__result-tip {
     margin: 0 0 12px;
     line-height: 22px;
+  }
+
+  &__skipped {
+    margin-bottom: 12px;
+
+    ul {
+      margin: 4px 0 0;
+      padding-left: 18px;
+    }
+
+    li {
+      line-height: 22px;
+    }
   }
 }
 </style>

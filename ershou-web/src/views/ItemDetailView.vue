@@ -15,6 +15,7 @@ import { addToCart } from '@/api/cart'
 import { openChatSession } from '@/api/chat'
 import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
 import { conditionLabel, formatDateTime, formatPrice, nameInitial } from '@/utils/format'
 import { showTip } from '@/utils/feedback'
@@ -22,6 +23,7 @@ import { showTip } from '@/utils/feedback'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const cartStore = useCartStore()
 const { ensureLogin } = useAuthGuard()
 
 const itemId = computed(() => Number(route.params.id))
@@ -95,6 +97,8 @@ async function handleAddCart(): Promise<void> {
   cartLoading.value = true
   try {
     await addToCart({ itemId: current.id, quantity: 1 })
+    // 顶栏红点要立刻跟上：以前只在布局挂载时算一次，加购后红点不动，像没加成功
+    await cartStore.refresh()
     showTip('已加入购物车，可继续挑几件一起面交')
   } catch {
     // 响应拦截器已提示

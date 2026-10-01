@@ -234,6 +234,27 @@ public class AmapPageController {
                       border:1px solid rgba(0,0,0,.06);box-shadow:0 2px 6px rgba(0,0,0,.16);
                       color:#1f2937;font:12px/1.4 system-ui;white-space:nowrap}
                     .pin.active .label{display:block}
+                    /* 选点时点哪里打的"水滴针"。
+                       pointer-events:none 是必须的：AMap 给 marker 外层设了 pointer-events:none，
+                       而这个标记正好压在用户要点的位置上，不关掉它会挡住后续的地图点击。 */
+                    .pickmark{position:relative;width:26px;height:36px;pointer-events:none;
+                      filter:drop-shadow(0 3px 6px rgba(0,0,0,.32))}
+                    .pickmark__head{position:absolute;left:0;top:0;width:26px;height:26px;
+                      box-sizing:border-box;border:2.5px solid #fff;border-radius:50%;
+                      background:#ff6b35;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+                    /* 水滴的尖：一个旋转 45° 的方块，只有一角露在圆形下方 */
+                    .pickmark__head::after{content:'';position:absolute;left:50%;top:20px;
+                      width:11px;height:11px;margin-left:-5.5px;border-radius:0 0 2px 0;
+                      background:#ff6b35;transform:rotate(45deg)}
+                    .pickmark__head::before{content:'';position:absolute;left:50%;top:9px;
+                      width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#fff}
+                    /* 地面小椭圆：给"针扎在地上"一点纵深感 */
+                    .pickmark__foot{position:absolute;left:50%;bottom:0;width:14px;height:5px;
+                      margin-left:-7px;border-radius:50%;background:rgba(0,0,0,.22)}
+                    /* 点一下播一次掉落动画，让"点哪儿打哪儿"看得见 */
+                    @keyframes pickdrop{0%{transform:translateY(-14px);opacity:0}
+                      60%{transform:translateY(0);opacity:1}100%{transform:translateY(0)}}
+                    .pickmark.is-drop{animation:pickdrop .26s ease-out}
                   </style>
                 </head>
                 <body>
@@ -273,9 +294,42 @@ public class AmapPageController {
                         viewMode: '2D'
                       });
                       map.addControl(new AMap.Scale());
+                      // 选点用的"水滴针"标记。
+                      // ⚠️ marker 的 content **必须自己写 pointer-events:auto**：AMap 给 marker
+                      // 外层容器设了 pointer-events:none，不加的话这个标记会挡住地图点击事件。
+                      // 也别只给内层 div 加——那样触摸仍然落不到它上面（气泡踩过这个坑）。
+                      function setPickMarker(lng, lat) {
+                        if (!window.__pickMarker) {
+                          window.__pickMarker = new AMap.Marker({
+                            position: [lng, lat], anchor: 'bottom-center', zIndex: 250,
+                            content: '<div class="pickmark"><i class="pickmark__head"></i>'
+                              + '<i class="pickmark__foot"></i></div>'
+                          });
+                          map.add(window.__pickMarker);
+                        } else {
+                          window.__pickMarker.setPosition([lng, lat]);
+                        }
+                        var el = window.__pickMarker.getContent();
+                        var dom = (typeof el === 'string')
+                          ? document.querySelector('.pickmark')
+                          : el;
+                        if (dom) {
+                          // 重新触发一次掉落动画，让"点哪儿打哪儿"这件事看得见
+                          dom.classList.remove('is-drop');
+                          void dom.offsetWidth;
+                          dom.classList.add('is-drop');
+                        }
+                      }
+                      window.__ershouPickMark = setPickMarker;
+                      window.__ershouClearPickMark = function () {
+                        if (window.__pickMarker) { map.remove(window.__pickMarker); window.__pickMarker = null; }
+                      };
                       map.on('click', function (e) {
                         if (!PICKABLE) return;
                         var lng = e.lnglat.getLng(), lat = e.lnglat.getLat();
+                        // 先在点击处打上标记：用户点了地图必须马上看到反馈，
+                        // 不能等逆地理编码回来才画（那也是 slow 的时候"像没反应"的原因）。
+                        setPickMarker(lng, lat);
                         if (!WANT_REGEO) {
                           post({ type: 'pick', lng: lng, lat: lat });
                           return;
@@ -297,7 +351,11 @@ public class AmapPageController {
                                 if (!nm || seen[nm]) continue;
                                 seen[nm] = 1;
                                 cands.push({ name: nm, address: pois[i].address || '',
-                                  distanceMeters: pois[i].distance || 0, isPoi: true });
+                                  distanceMeters: pois[i].distance || 0, isPoi: true,
+                                  // 带上高德认定的 POI 坐标：用户拍板某个候选时，
+                                  // 针要挪到 POI 的位置（而不是随手点的那个坐标）
+                                  lng: pois[i].location ? pois[i].location.lng : null,
+                                  lat: pois[i].location ? pois[i].location.lat : null });
                               }
                               var fmt = (regeo.formattedAddress || '').trim();
                               if (fmt && !seen[fmt]) {

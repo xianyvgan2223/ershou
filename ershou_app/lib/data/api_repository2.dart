@@ -327,14 +327,25 @@ class OrderRepository {
         () => _api.dio.post<dynamic>('/meetup-orders/' + orderId.toString() + '/confirm'),
       );
 
-  /// 改面交地点（买卖双方都能改，限状态 1 待确认 / 2 待面交）。
+  /// 改面交地点与时间（**只有卖家能改**，限状态 1 待确认 / 2 待面交）。
   ///
-  /// 改完后端会给对方发一条私聊提醒，并把 `reschedule_count` +1。
-  /// 只能选**本校区**的点位——所以调用方要传当前校区内的 pointId。
-  Future<void> updatePoint(int orderId, int pointId) => _api.envelope<void>(
+  /// 时间窗可选：只改地点就不传。改完后端会给对方发私聊提醒、`reschedule_count` +1。
+  /// 只能选**本校区**的点位（跨校区会被后端拒）。
+  Future<void> updatePoint(
+    int orderId,
+    int pointId, {
+    String? timeSlotStart,
+    String? timeSlotEnd,
+  }) =>
+      _api.envelope<void>(
         () => _api.dio.patch<dynamic>(
           '/meetup-orders/' + orderId.toString() + '/point',
-          data: {'pointId': pointId},
+          data: {
+            'pointId': pointId,
+            if (timeSlotStart != null && timeSlotStart.isNotEmpty)
+              'timeSlotStart': timeSlotStart,
+            if (timeSlotEnd != null && timeSlotEnd.isNotEmpty) 'timeSlotEnd': timeSlotEnd,
+          },
         ),
       );
 
@@ -366,6 +377,72 @@ class OrderRepository {
       parse: (data) => (data is Map) ? ((data['total'] as num?)?.toInt() ?? 0) : 0,
     );
     return env.data ?? 0;
+  }
+}
+
+/// 购物车。
+///
+/// 与 Web 端同一套接口：`GET /cart` 已按卖家分组，"合并面交"就是同一个卖家一起约。
+class CartRepository {
+  CartRepository(this._api);
+
+  final ApiClient _api;
+
+  /// 购物车（按卖家分组）
+  Future<List<CartGroup>> groups() async {
+    final env = await _api.envelope<List<CartGroup>>(
+      () => _api.dio.get<dynamic>('/cart'),
+      parse: (data) => ((data as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => CartGroup.fromJson(e.cast<String, dynamic>()))
+          .toList(),
+    );
+    return env.data ?? const [];
+  }
+
+  /// 件数之和（底部/顶栏红点用；口径与 Web 端一致）
+  Future<int> count() async {
+    final list = await groups();
+    return list.fold<int>(
+      0,
+      (sum, g) => sum + g.items.fold<int>(0, (n, row) => n + row.quantity),
+    );
+  }
+
+  Future<void> add(int itemId, {int quantity = 1}) => _api.envelope<void>(
+        () => _api.dio.post<dynamic>('/cart', data: {
+          'itemId': itemId,
+          'quantity': quantity,
+        }),
+      );
+
+  Future<void> updateQuantity(int cartId, int quantity) => _api.envelope<void>(
+        () => _api.dio.patch<dynamic>('/cart/' + cartId.toString(),
+            data: {'quantity': quantity}),
+      );
+
+  Future<void> remove(int cartId) => _api.envelope<void>(
+        () => _api.dio.delete<dynamic>('/cart/' + cartId.toString()),
+      );
+
+  /// 一键合并面交：按卖家拆成多张面交单，共用一个批次号。
+  ///
+  /// 返回 `skipped`：本次因商品已不可面交而未提交的条目（后端只结算能约的，
+  /// 不会因为一件坏商品让整批失败）。
+  Future<Map<String, dynamic>> checkout({
+    required List<int> cartIds,
+    int? pointId,
+    String? remark,
+  }) async {
+    final env = await _api.envelope<Map<String, dynamic>>(
+      () => _api.dio.post<dynamic>('/cart/checkout', data: {
+        'cartIds': cartIds,
+        if (pointId != null) 'pointId': pointId,
+        if (remark != null && remark.isNotEmpty) 'remark': remark,
+      }),
+      parse: (data) => (data as Map).cast<String, dynamic>(),
+    );
+    return env.data ?? const {};
   }
 }
 

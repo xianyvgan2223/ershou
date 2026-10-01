@@ -8,6 +8,7 @@ import '../../data/models2.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
+import 'point_picker_page.dart';
 
 /// 我的面交：买 / 卖双 tab，按角色给出可执行动作。
 class MeetupOrdersPage extends ConsumerStatefulWidget {
@@ -140,9 +141,8 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
   }
 
   Widget _card(MeetupOrder o, bool isBuyer) {
-    final timeText = o.timeSlotStart.isEmpty
-        ? '时间待协商'
-        : (o.timeSlotStart + (o.timeSlotEnd.isEmpty ? '' : ' ~ ' + o.timeSlotEnd));
+    // 统一走 Fmt.slot：后端给的是 ISO 串，直接拼出来是 2026-10-02T12:00:00 很扎眼
+    final timeText = o.timeSlotStart.isEmpty ? '时间待协商' : Fmt.slot(o.timeSlotStart, o.timeSlotEnd);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
       child: AppCard(
@@ -222,9 +222,117 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
         ],
       );
 
+  /// 卖家改面交地点（顺带可定时间）。
+  ///
+  /// 流程：选点位（可点气泡选现成的，也可点空白新建）→ 可选时间 → PATCH。
+  /// 改完后端会给买家发一条私聊提醒，让他在聊天里就能看到新地点。
+  Future<void> _changeMeetup(MeetupOrder o) async {
+    final point = await Navigator.of(context).push<MapPoint>(
+      MaterialPageRoute<MapPoint>(
+        builder: (_) => const PointPickerPage(pickExisting: true, title: '定面交地点'),
+      ),
+    );
+    if (!mounted || point == null) return;
+    // 时间窗选填：不填就是"待协商"，与发布/约面交时的口径一致
+    final slot = await _askTimeSlot(o);
+    if (!mounted || slot == null) return;
+    try {
+      await ref.read(orderRepositoryProvider).updatePoint(
+            o.id,
+            point.id,
+            timeSlotStart: slot.$1,
+            timeSlotEnd: slot.$2,
+          );
+      if (!mounted) return;
+      showToast(context, '已把面交点改成「${point.name}」，买家会收到提醒');
+      await _load();
+    } catch (e) {
+      if (mounted) showToast(context, '改面交地点失败：$e');
+    }
+  }
+
+  /// 选时间窗：给几个常用档 + 保留原时间 + 待协商。
+  /// 返回 (start, end)，格式与后端 FMT 一致：yyyy-MM-dd HH:mm:ss。
+  Future<(String?, String?)?> _askTimeSlot(MeetupOrder o) async {
+    String two(int v) => v.toString().padLeft(2, '0');
+    String fmt(DateTime t) =>
+        '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}:00';
+
+    final now = DateTime.now();
+    // 今天/明天各给两个常见时段（课间与晚饭后）
+    final options = <String, (String, String)>{};
+    for (final day in [now, now.add(const Duration(days: 1))]) {
+      final label = day.day == now.day ? '今天' : '明天';
+      options['$label 12:00 - 13:00'] =
+          (fmt(DateTime(day.year, day.month, day.day, 12)), fmt(DateTime(day.year, day.month, day.day, 13)));
+      options['$label 18:00 - 19:00'] =
+          (fmt(DateTime(day.year, day.month, day.day, 18)), fmt(DateTime(day.year, day.month, day.day, 19)));
+    }
+    final keepCurrent = o.timeSlotStart.isNotEmpty && o.timeSlotEnd.isNotEmpty;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('面交时间（选填）',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            if (keepCurrent)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.schedule, size: 18),
+                title: Text('保持原时间：${Fmt.slot(o.timeSlotStart, o.timeSlotEnd)}',
+                    style: const TextStyle(fontSize: 13.5)),
+                onTap: () => Navigator.pop(ctx, '__keep__'),
+              ),
+            ...options.entries.map((e) => ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.schedule, size: 18),
+                  title: Text(e.key, style: const TextStyle(fontSize: 13.5)),
+                  onTap: () => Navigator.pop(ctx, e.key),
+                )),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.more_horiz, size: 18),
+              title: const Text('待协商（先只改地点）', style: TextStyle(fontSize: 13.5)),
+              onTap: () => Navigator.pop(ctx, '__none__'),
+            ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return null;
+    if (choice == '__keep__') return (o.timeSlotStart, o.timeSlotEnd);
+    if (choice == '__none__') return (null, null);
+    final picked = options[choice]!;
+    return (picked.$1, picked.$2);
+  }
+
   /// 状态码含义（与后端一致）：1 待卖家确认 / 2 待面交 / 3 已完成 / 4 已拒绝 / 5 已取消
   Widget _actions(MeetupOrder o, bool isBuyer) {
     final buttons = <Widget>[];
+    // **只有卖家能定面交地点与时间**（后端 updatePoint 强校验 sellerId）。
+    // 买家这一侧不放入口，想改就在私聊里跟卖家商量。
+    if (!isBuyer && (o.status == 1 || o.status == 2)) {
+      buttons.add(OutlinedButton(
+        onPressed: () => _changeMeetup(o),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(104, 36),
+          foregroundColor: AppColors.brandDark,
+          side: const BorderSide(color: AppColors.brand),
+        ),
+        child: Text(o.pointName.isEmpty ? '定面交地点' : '改面交地点',
+            style: const TextStyle(fontSize: 13)),
+      ));
+    }
     if (!isBuyer && o.status == 1) {
       buttons.add(FilledButton(
         onPressed: () => _act(
@@ -270,13 +378,19 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
         style: const TextStyle(fontSize: 11.5, color: AppColors.inkFaint),
       );
     }
-    return Row(
+    // 用 Wrap 而不是 Row：卖家在状态 1 会有三个按钮（改面交地点 / 接受面交 / 拒绝），
+    // 固定 Row 在 720px 宽的真机上会溢出 40px 把"拒绝"挤出屏幕（实测带黄黑警告条）。
+    // Wrap 放不下就换行，按钮多了也不会挤爆。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < buttons.length; i++) ...[
-          if (i > 0) const SizedBox(width: 10),
-          buttons[i],
-        ],
-        const Spacer(),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: buttons,
+        ),
+        const SizedBox(height: 6),
         Text(
           Fmt.timeAgo(o.createdAt),
           style: const TextStyle(fontSize: 11.5, color: AppColors.inkFaint),

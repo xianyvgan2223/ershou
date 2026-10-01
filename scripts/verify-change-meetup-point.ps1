@@ -114,6 +114,22 @@ try {
   Check 'reschedule_count +1' ((Sql1 "SELECT reschedule_count FROM meetup_order WHERE id=$orderId;") -eq '1') ('实际 ' + (Sql1 "SELECT reschedule_count FROM meetup_order WHERE id=$orderId;"))
 
   Write-Host ''
+  Write-Host '=== 2.5 卖家可以一次同时改地点 + 时间 ===' -ForegroundColor Cyan
+  # 移动端卖家入口就是这么调的：选点位后可选时间，一次 PATCH 全改掉
+  $slotS = '2026-10-03 12:00:00'
+  $slotE = '2026-10-03 13:00:00'
+  $rs = Req PATCH "$base/meetup-orders/$orderId/point" @{ pointId = $ptB.data.id; timeSlotStart = $slotS; timeSlotEnd = $slotE } $st
+  Check '卖家一次改地点+时间成功' ($rs.code -eq 0) ($rs | ConvertTo-Json -Compress)
+  Check '时间窗已写入' ((Sql1 "SELECT DATE_FORMAT(time_slot_start,'%Y-%m-%d %H:%i:%s') FROM meetup_order WHERE id=$orderId;") -eq $slotS) ('实际 ' + (Sql1 "SELECT time_slot_start FROM meetup_order WHERE id=$orderId;"))
+  Check '只改地点（不传时间）不会清掉已有时间' `
+    ((Req PATCH "$base/meetup-orders/$orderId/point" @{ pointId = $ptA.data.id } $st).code -eq 0) '改失败'
+  Check '时间窗仍在' ((Sql1 "SELECT DATE_FORMAT(time_slot_end,'%Y-%m-%d %H:%i:%s') FROM meetup_order WHERE id=$orderId;") -eq $slotE) ('实际 ' + (Sql1 "SELECT time_slot_end FROM meetup_order WHERE id=$orderId;"))
+  # 买家即使混传时间也改不动（服务端先判 sellerId）
+  $rb2 = Req PATCH "$base/meetup-orders/$orderId/point" @{ pointId = $ptB.data.id; timeSlotStart = $slotS; timeSlotEnd = $slotE } $bt
+  Check '买家混传时间也改不动' ($rb2.code -ne 0) ('code=' + $rb2.code)
+  Check '买家改完后地点仍是原值' ((Sql1 "SELECT point_id FROM meetup_order WHERE id=$orderId;") -eq "$($ptA.data.id)") ('实际 ' + (Sql1 "SELECT point_id FROM meetup_order WHERE id=$orderId;"))
+
+  Write-Host ''
   Write-Host '=== 3. 改完给对方发私聊提醒 ===' -ForegroundColor Cyan
   # 提醒走 TxHooks.afterCommit（提交后才发）；且**私聊内容是加密存储的**，
   # 必须走接口读明文，SQL LIKE 明文永远查不到
@@ -132,7 +148,8 @@ try {
   Write-Host '=== 4. 异校区点位被拒绝且回滚 ===' -ForegroundColor Cyan
   $r3 = Req PATCH "$base/meetup-orders/$orderId/point" @{ pointId = $ptJj.data.id } $st
   Check '异校区点位被拒绝' ($r3.code -ne 0) ('code=' + $r3.code)
-  Check '点位没有被改掉（回滚）' ((Sql1 "SELECT point_id FROM meetup_order WHERE id=$orderId;") -eq "$($ptB.data.id)") '被改了'
+  # 2.5 段结束后点位是 A（那一步把地点改回了 A），所以这里比对 A
+  Check '点位没有被改掉（回滚）' ((Sql1 "SELECT point_id FROM meetup_order WHERE id=$orderId;") -eq "$($ptA.data.id)") ('实际 ' + (Sql1 "SELECT point_id FROM meetup_order WHERE id=$orderId;"))
 
   Write-Host ''
   Write-Host '=== 5. 不存在的点位 / 未登录 / 第三方 ===' -ForegroundColor Cyan

@@ -69,6 +69,20 @@ try {
   Check '点位数据走同源接口（相对路径）' ($html -match "fetch\('/api/v1/map/points") '不是相对路径'
 
   Write-Host ''
+  Write-Host '=== 2.5 选点打点标记（pickable 时点地图必须出针）===' -ForegroundColor Cyan
+  # 这个 bug 的现象是"点了地图什么都不出现"，用户没法确认自己点到哪了。
+  # 成因：map.on('click') 里只 post 了坐标，**根本没画标记**。
+  $pick = (Invoke-WebRequest -Uri "$base/api/v1/map/amap-html?campusId=2&pickable=true&wantRegeo=true" -UseBasicParsing).Content
+  Check 'pickable 页面带打点标记的样式（.pickmark）' ($pick -match '\.pickmark') '缺样式'
+  Check '点击处理里会调用打点函数' ($pick -match 'setPickMarker\(lng, lat\)') '点击没打点'
+  Check '打点标记用 anchor: bottom-center（针尖对准坐标）' ($pick -match "anchor: 'bottom-center'") '锚点不对'
+  Check '打点标记不拦截地图点击（pointer-events:none）' ($pick -match '\.pickmark\{[^}]*pointer-events:none') '会挡住点击'
+  Check '暴露 __ershouPickMark 给 Flutter 调用' ($pick -match '__ershouPickMark') '缺钩子'
+  Check '候选地点带 POI 坐标（拍板候选时把针挪过去）' ($pick -match 'lng: pois\[i\]\.location') '缺 POI 坐标'
+  # 非选点页不该出现打点（避免地图页误打针）
+  Check '非 pickable 页面同样带样式但点击被拦掉' ($html -match 'if \(!PICKABLE\) return;') '缺 PICKABLE 判断'
+
+  Write-Host ''
   Write-Host '=== 3. 页面依赖的同源接口可用 ===' -ForegroundColor Cyan
   $pts = Invoke-RestMethod -Uri "$base/api/v1/map/points?campusId=2"
   Check '同源 /map/points 返回 code=0' ($pts.code -eq 0) '失败'

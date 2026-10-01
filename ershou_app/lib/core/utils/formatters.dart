@@ -39,5 +39,37 @@ class Fmt {
     return raw.substring(0, 3) + '****' + raw.substring(7);
   }
 
+  /// 面交时间窗：把后端的 ISO 串（`2026-10-02T12:00:00`）显示成人看的样子。
+  ///
+  /// 以前直接把 ISO 串拼出来，界面上是 `2026-10-02T12:00:00 ~ 2026-10-02T13:00:00`，
+  /// 那个 `T` 和重复的日期很扎眼。规则：
+  /// - 同一天：`10-02 12:00 ~ 13:00`
+  /// - 跨天：`10-02 12:00 ~ 10-03 13:00`
+  static String slot(String? start, String? end) {
+    final s = _parse(start);
+    if (s == null) {
+      // 解析不出来就退回原文，至少别显示空白
+      final raw = (start ?? '').trim();
+      if (raw.isEmpty) return '待协商';
+      final e = (end ?? '').trim();
+      return e.isEmpty ? raw : raw + ' ~ ' + e;
+    }
+    final e = _parse(end);
+    final sText = '${_two(s.month)}-${_two(s.day)} ${_two(s.hour)}:${_two(s.minute)}';
+    if (e == null) return sText;
+    final sameDay = s.year == e.year && s.month == e.month && s.day == e.day;
+    final eText = sameDay
+        ? '${_two(e.hour)}:${_two(e.minute)}'
+        : '${_two(e.month)}-${_two(e.day)} ${_two(e.hour)}:${_two(e.minute)}';
+    return '$sText ~ $eText';
+  }
+
+  /// 兼容 `2026-10-02T12:00:00` 与 `2026-10-02 12:00:00` 两种写法
+  static DateTime? _parse(String? raw) {
+    final v = (raw ?? '').trim();
+    if (v.isEmpty) return null;
+    return DateTime.tryParse(v) ?? DateTime.tryParse(v.replaceFirst(' ', 'T'));
+  }
+
   static String _two(int v) => v < 10 ? '0' + v.toString() : v.toString();
 }

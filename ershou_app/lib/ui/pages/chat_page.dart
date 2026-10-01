@@ -624,7 +624,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   const Icon(Icons.schedule, size: 13, color: AppColors.inkFaint),
                   const SizedBox(width: 4),
                   Text(
-                    '${order.timeSlotStart} ~ ${order.timeSlotEnd}',
+                    Fmt.slot(order.timeSlotStart, order.timeSlotEnd),
                     style: const TextStyle(fontSize: 11.5, color: AppColors.inkFaint),
                   ),
                 ],

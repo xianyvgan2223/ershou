@@ -73,11 +73,37 @@ public class OrderService {
         if (cartItems.isEmpty()) {
             throw new BizException(ResultCode.PARAM_ERROR, "购物车里没有可结算的商品");
         }
+        // 先按商品状态分流。
+        //
+        // 以前是"边建单边校验"，只要有一条不可面交就抛异常 → **整批回滚**，
+        // 用户看到的是"商品已被其他同学约走"，然后一件都结算不了（实测 2 张单变 0 张），
+        // 而且失败原因说不清是哪件。现在：可面交的照常结算，不可面交的**逐条回报**给前端。
+        List<CartItem> ok = new ArrayList<>();
+        List<Map<String, Object>> skipped = new ArrayList<>();
+        for (CartItem ci : cartItems) {
+            Item item = itemMapper.selectById(ci.getItemId());
+            String reason = unavailableReason(item, buyerId);
+            if (reason != null) {
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("cartId", ci.getId());
+                s.put("itemId", ci.getItemId());
+                s.put("title", item == null ? "已下架的商品" : item.getTitle());
+                s.put("reason", reason);
+                skipped.add(s);
+            } else {
+                ok.add(ci);
+            }
+        }
+        if (ok.isEmpty()) {
+            throw new BizException(ResultCode.ITEM_LOCKED,
+                    "勾选的商品都不可面交了（" + (skipped.isEmpty() ? "" : String.valueOf(skipped.get(0).get("reason"))) + "）");
+        }
+
         String batchNo = genBatchNo();
         String pointName = pointName(dto.getPointId());
         List<Map<String, Object>> created = new ArrayList<>();
         List<Long> usedCartIds = new ArrayList<>();
-        for (CartItem ci : cartItems) {
+        for (CartItem ci : ok) {
             MeetupOrder order = doCreate(buyerId, ci.getItemId(), ci.getQuantity(),
                     dto.getPointId(), dto.getTimeSlotStart(), dto.getTimeSlotEnd(), dto.getRemark(), batchNo);
             created.add(orderBrief(order));
@@ -86,11 +112,33 @@ public class OrderService {
             TxHooks.afterCommit(() -> notifySeller(order, pointName));
         }
         cartService.removeByIds(usedCartIds);
-        log.info("[order][checkout][{}] batch={} 生成 {} 张面交单（未锁库）", buyerId, batchNo, created.size());
+        log.info("[order][checkout][{}] batch={} 生成 {} 张面交单（跳过 {} 件不可面交）",
+                buyerId, batchNo, created.size(), skipped.size());
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("batchNo", batchNo);
         result.put("orders", created);
+        result.put("skipped", skipped);
         return result;
+    }
+
+    /** 商品为什么不能约面交；能约返回 null（与 {@link #doCreate} 同一套判断口径） */
+    private String unavailableReason(Item item, Long buyerId) {
+        if (item == null) {
+            return "商品已不存在";
+        }
+        if (item.getStatus() != null && item.getStatus() == 4) {
+            return "商品已售出";
+        }
+        if (item.getStatus() != null && item.getStatus() == 3) {
+            return "商品已被其他同学约走";
+        }
+        if (item.getStatus() == null || item.getStatus() != 2) {
+            return "商品当前不可约面交";
+        }
+        if (Objects.equals(item.getSellerId(), buyerId)) {
+            return "不能约自己发布的商品";
+        }
+        return null;
     }
 
     /** 点位名（空点位返回 null，前端显示"待协商"） */

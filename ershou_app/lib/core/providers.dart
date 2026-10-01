@@ -101,6 +101,10 @@ final orderRepositoryProvider = Provider<OrderRepository>(
   (ref) => OrderRepository(ref.watch(apiClientProvider)),
 );
 
+final cartRepositoryProvider = Provider<CartRepository>(
+  (ref) => CartRepository(ref.watch(apiClientProvider)),
+);
+
 final userRepositoryProvider = Provider<UserRepository>(
   (ref) => UserRepository(ref.watch(apiClientProvider)),
 );
@@ -273,6 +277,31 @@ class NavIndexNotifier extends Notifier<int> {
 
 /// 未读消息数（底部导航红点）。
 final unreadProvider = NotifierProvider<UnreadNotifier, int>(UnreadNotifier.new);
+
+/// 购物车件数（商品详情页购物车图标上的红点）。
+///
+/// 与 Web 端同一口径：**件数之和**（1 条 × 3 件 = 3），不是条目数。
+/// 加入购物车 / 移除 / 结算之后都要调 refresh()，否则红点会停在上一次的值。
+final cartCountProvider = NotifierProvider<CartCountNotifier, int>(CartCountNotifier.new);
+
+class CartCountNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  Future<void> refresh() async {
+    if (!ref.read(authProvider).isLoggedIn) {
+      state = 0;
+      return;
+    }
+    try {
+      state = await ref.read(cartRepositoryProvider).count();
+    } catch (_) {
+      // 红点不是关键路径：失败保持上一次的值，不要因为一次请求失败就闪没
+    }
+  }
+
+  void clear() => state = 0;
+}
 
 class UnreadNotifier extends Notifier<int> {
   @override

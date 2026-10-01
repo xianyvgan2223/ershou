@@ -10,6 +10,10 @@ double _num(Object? v) {
 int _intOf(Object? v) =>
     v is num ? v.toInt() : (int.tryParse(v?.toString() ?? '') ?? 0);
 
+/// 价格这类小数：后端可能给 num，也可能是字符串（JSON 精度保护）
+double _doubleOf(Object? v) =>
+    v is num ? v.toDouble() : (double.tryParse(v?.toString() ?? '') ?? 0);
+
 int? _intOrNull(Object? v) => v == null ? null : _intOf(v);
 
 String _str(Object? v) => v?.toString() ?? '';
@@ -463,5 +467,80 @@ class CampusInfo {
         id: _intOf(j['id']),
         schoolId: _intOf(j['schoolId']),
         name: _str(j['name']),
+      );
+}
+
+/// 购物车里的一件商品（后端已按卖家分组，这是组里的行）
+class CartRow {
+  const CartRow({
+    required this.cartId,
+    required this.itemId,
+    this.title = '',
+    this.coverUrl = '',
+    this.price = 0,
+    this.quantity = 1,
+    this.status = 0,
+    this.statusText = '',
+    this.preferPointName,
+  });
+
+  final int cartId;
+  final int itemId;
+  final String title;
+  final String coverUrl;
+  final double price;
+  final int quantity;
+  final int status;
+  final String statusText;
+  final String? preferPointName;
+
+  /// 只有「在售」能结算：已锁定 / 已售出 / 已下架都不行
+  bool get sellable => status == 2;
+
+  double get subtotal => price * quantity;
+
+  factory CartRow.fromJson(Map<String, dynamic> j) => CartRow(
+        cartId: _intOf(j['cartId']),
+        itemId: _intOf(j['itemId']),
+        title: _str(j['title']),
+        coverUrl: _str(j['coverUrl']),
+        price: _doubleOf(j['price']),
+        quantity: _intOf(j['quantity']) == 0 ? 1 : _intOf(j['quantity']),
+        status: _intOf(j['status']),
+        statusText: _str(j['statusText']),
+        preferPointName: j['preferPointName'] == null ? null : _str(j['preferPointName']),
+      );
+}
+
+/// 购物车按卖家分组（"合并面交"就是同一个卖家一起约）
+class CartGroup {
+  const CartGroup({required this.sellerId, this.sellerName = '', this.items = const []});
+
+  final int sellerId;
+  final String sellerName;
+  final List<CartRow> items;
+
+  factory CartGroup.fromJson(Map<String, dynamic> j) => CartGroup(
+        sellerId: _intOf(j['sellerId']),
+        sellerName: _str(j['sellerName']),
+        items: ((j['items'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => CartRow.fromJson(e.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+/// 结算时被跳过的条目（商品已不可面交）。一件坏商品不该拖垮整批结算。
+class CheckoutSkipped {
+  const CheckoutSkipped({required this.cartId, this.title = '', this.reason = ''});
+
+  final int cartId;
+  final String title;
+  final String reason;
+
+  factory CheckoutSkipped.fromJson(Map<String, dynamic> j) => CheckoutSkipped(
+        cartId: _intOf(j['cartId']),
+        title: _str(j['title']),
+        reason: _str(j['reason']),
       );
 }

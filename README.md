@@ -491,8 +491,12 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 **发布页 / 私聊页的面交点选择**
 
 - 发布页「地图上选」→ `PointPickerPage(pickExisting: false)`：点地图 → 逆地理编码识别地名 → `POST /trade-points` 建新点 → 回填选中；
+  - 点地图会**立刻打一个橙色水滴针**（不等逆地理编码回来），针尖对准坐标；拍板某个候选地点时针会挪到高德认定的 POI 位置；
 - 排查"点了没反应"的利器：页面把 `ready` 事件带 `count / markerCount / merged` 回传，
   Flutter debug 下打印每个桥接事件（`debugPrint('[map] ...')`）——一眼能看出"画了几个""事件有没有到"。
+- **面交地点与时间只有卖家能改**（商品在卖家手上，地点时间由他定；买家想改在私聊里商量）：
+  卖家入口在「我的面交 → 我卖的」订单卡的「改面交地点」（选点位 + 选时间窗）；
+  后端两道校验 —— 订单侧 `updatePoint` 校验 `sellerId`，商品侧 `PUT /items/{id}` 校验 `ITEM_NOT_OWNER`；
 - 私聊页交易卡片「改地点」→ `PointPickerPage(pickExisting: true)`：**点气泡选现成的**（右上角变「就用这个」），点空白处则新建 → `PATCH /meetup-orders/{id}/point`；
   **只有卖家能改**面交地点与时间（商品在他手上，地点时间由他定；买家想改在私聊里商量）——后端 `updatePoint` 强校验 `sellerId`，前端只是把入口藏掉；
 - 改完对方收到私聊提醒「【面交地点已更新】…」，`reschedule_count` +1。
@@ -503,6 +507,21 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 
 > 两个测试都踩过的坑：**私聊内容是加密存储的**（库里是 `v1:xxx` 密文），验证通知必须走接口读明文，
 > 直接 SQL `LIKE '%文字%'` 永远查不到。
+
+**购物车（`/api/v1/cart`）**
+
+- **加购即校验**：已售出 / 已锁定 / 自己的商品 / 超库存都会被拒（和结算同一套口径），不然前端显示成可结算、到结算才失败，用户白跑一趟；
+- **数量夹取**：孤品恒为 1，其余夹在 `[1, 库存]`；
+- **结算不会因一件坏商品整批失败**：先按状态分流，能约的照常提交，不能约的逐条回报在 `skipped: [{cartId,itemId,title,reason}]` 里，前端弹窗列出哪件、为什么；
+- 拆单语义：**每件商品一张面交单**（同一个卖家的多件也是多张），只是共用一个 `batchNo`；
+- 移动端与 Web 端同一套接口与语义；回归：`powershell -File scripts/verify-cart.ps1`（31 项）
+
+**红点规则（网页端导航）**
+
+- 「购物车」件数 / 「我的面交」待办：**在对应页面自己不显示**（人已经站在那一页了，气泡就没意义）；
+- 「消息」未读红点**不受此规则影响**：一个会话已读不代表别的会话没新消息；
+- 「我的面交」页内两个 tab 也各带待办数字（`asBuyer` / `asSeller`），与导航红点同一份数据；
+- 回归：`node scripts/verify-web-badges.mjs`（6 项，需 `WEB_TOKEN` 与在跑的 dev server）
 
 **未读角标（`GET /api/v1/chat/unread`）以 DB 为权威**
 

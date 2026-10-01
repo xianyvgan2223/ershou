@@ -145,9 +145,35 @@ onMounted(loadOrders)
       <el-button :icon="Refresh" :loading="loading" @click="loadOrders">刷新</el-button>
     </div>
 
+    <!-- tab 上带待办数字：买家提交意向落在「我卖出的」，卖家接受/拒绝落在「我买到的」。
+         以前两个 tab 是纯文字，有人下单了只能自己点进去才发现（用户反馈：
+         "有人买商品后我的面交的我卖的上方没有气泡提示"）。
+         数字与导航红点同一份数据（meetupStore 轮询 30s + 交易动作后立即刷新）。 -->
     <el-tabs v-model="role" class="orders__tabs">
-      <el-tab-pane label="我买到的" name="buyer" />
-      <el-tab-pane label="我卖出的" name="seller" />
+      <el-tab-pane name="buyer">
+        <template #label>
+          <span class="orders__tab-label">
+            我买到的
+            <el-badge
+              v-if="meetupStore.asBuyer > 0"
+              :value="meetupStore.asBuyer"
+              class="orders__tab-badge"
+            />
+          </span>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane name="seller">
+        <template #label>
+          <span class="orders__tab-label">
+            我卖出的
+            <el-badge
+              v-if="meetupStore.asSeller > 0"
+              :value="meetupStore.asSeller"
+              class="orders__tab-badge"
+            />
+          </span>
+        </template>
+      </el-tab-pane>
     </el-tabs>
 
     <div v-loading="loading" class="orders__body">
@@ -259,6 +285,25 @@ onMounted(loadOrders)
 
 <style scoped lang="scss">
 .orders {
+  &__tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  // el-badge 默认把数字挂在内容右上角，在 tab 文字里会顶到行外；
+  // 这里把它拉回行内，只保留那个小圆点数字
+  &__tab-badge {
+    margin-left: 2px;
+    line-height: 1;
+
+    :deep(.el-badge__content) {
+      position: static;
+      transform: none;
+      border: none;
+    }
+  }
+
   &__tabs {
     margin-bottom: 8px;
   }
