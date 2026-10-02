@@ -37,9 +37,15 @@ seller.seen.length = 0
 
 const text = 'probe-' + Date.now()
 console.log(`买家发送: ${text}`)
+// ⚠️ 帧是**扁平**的：sessionId / content 必须放顶层。
+// 服务端读的是 node.path("sessionId")，套一层 data 会解析成 0 → 70002 会话不存在
+// （这个坑我自己先踩了一次，写探针时按 {type,data} 发，结果误判成"投递失败"）
 buyer.ws.send(JSON.stringify({
   type: 'send',
-  data: { sessionId, msgType: 1, content: text, clientMsgId: 'probe-' + Date.now() },
+  sessionId,
+  msgType: 1,
+  content: text,
+  clientMsgId: 'probe-' + Date.now(),
 }))
 
 await new Promise((r) => setTimeout(r, 2500))

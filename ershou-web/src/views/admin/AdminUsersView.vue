@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import { adjustUserCredit, fetchAdminUsers, updateUserStatus } from '@/api/admin'
 import type { AdminUser } from '@/api/admin'
+import { useAdminStore } from '@/stores/admin'
 import { formatDateTime, nameInitial } from '@/utils/format'
 import type { TagType } from '@/utils/format'
+import { useQuerySync } from '@/composables/useQuerySync'
+import { showTip } from '@/utils/feedback'
 
-const route = useRoute()
-const PAGE_SIZE = 10
+const PAGE_SIZES = [10, 20, 50]
 
 const STATUS_OPTIONS = [
   { label: '正常', value: 1 },
@@ -19,10 +19,15 @@ const STATUS_OPTIONS = [
 
 const keyword = ref('')
 const statusFilter = ref<number | ''>('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+
+const adminStore = useAdminStore()
 const loading = ref(false)
 const list = ref<AdminUser[]>([])
 const total = ref(0)
-const pageNum = ref(1)
+
+const hasFilter = computed(() => !!keyword.value.trim() || statusFilter.value !== '')
 
 const statusDialog = reactive({
   visible: false,
@@ -48,7 +53,7 @@ async function load(): Promise<void> {
       keyword: keyword.value.trim() || undefined,
       status: statusFilter.value === '' ? undefined : statusFilter.value,
       pageNum: pageNum.value,
-      pageSize: PAGE_SIZE,
+      pageSize: pageSize.value,
     })
     list.value = res.records ?? []
     total.value = res.total ?? 0
@@ -65,8 +70,10 @@ function search(): void {
   load()
 }
 
-function changePage(page: number): void {
-  pageNum.value = page
+function reset(): void {
+  keyword.value = ''
+  statusFilter.value = ''
+  pageNum.value = 1
   load()
 }
 
@@ -87,9 +94,10 @@ async function submitStatus(): Promise<void> {
       banDays: statusDialog.status === 3 ? statusDialog.banDays : undefined,
       reason: statusDialog.reason.trim() || undefined,
     })
-    ElMessage.success('已更新用户状态')
+    showTip('已更新用户状态', 'success')
     statusDialog.visible = false
-    await load()
+    // 封禁数会影响概览卡片，顺手刷一下侧栏角标
+    await Promise.all([load(), adminStore.refresh()])
   } catch {
     // 拦截器已提示
   } finally {
@@ -107,11 +115,11 @@ function openCredit(user: AdminUser): void {
 async function submitCredit(): Promise<void> {
   if (!creditDialog.target) return
   if (!creditDialog.changeValue) {
-    ElMessage.warning('请填写非 0 的分值变化')
+    showTip('请填写非 0 的分值变化', 'warning')
     return
   }
   if (!creditDialog.reason.trim()) {
-    ElMessage.warning('请填写调整原因（会写入信用流水）')
+    showTip('请填写调整原因（会写入信用流水）', 'warning')
     return
   }
   creditDialog.loading = true
@@ -120,7 +128,7 @@ async function submitCredit(): Promise<void> {
       changeValue: creditDialog.changeValue,
       reason: creditDialog.reason.trim(),
     })
-    ElMessage.success('信用分已调整')
+    showTip('信用分已调整', 'success')
     creditDialog.visible = false
     await load()
   } catch {
@@ -144,17 +152,41 @@ function isAdminUser(user: AdminUser): boolean {
   return ((user.roleFlags ?? 0) & 8) !== 0
 }
 
-onMounted(() => {
-  const qs = route.query.status
-  if (typeof qs === 'string' && qs !== '') {
-    statusFilter.value = Number(qs)
-  }
-  load()
+/** 多库存商家（role_flags 位 2） */
+function isShopUser(user: AdminUser): boolean {
+  return ((user.roleFlags ?? 0) & 2) !== 0
+}
+
+/** 信用分展示：>=90 优秀绿、<60 风险红 */
+function creditColor(score?: number): string {
+  if (score === undefined || score === null) return 'var(--text-1)'
+  if (score >= 90) return 'var(--brand-600)'
+  if (score < 60) return '#f5455c'
+  return 'var(--text-1)'
+}
+
+/** 调整后的预估分值：后端会把结果夹在 0~100，这里同口径预览，避免运营填完才发现被截断 */
+const creditAfter = computed(() => {
+  const base = creditDialog.target?.creditScore ?? 0
+  return Math.max(0, Math.min(100, base + creditDialog.changeValue))
 })
+
+useQuerySync(
+  { keyword, statusFilter, pageNum, pageSize },
+  { keyword: '', statusFilter: '' as number | '', pageNum: 1, pageSize: 10 },
+  {
+    onChange: load,
+    aliases: { statusFilter: 'status', pageNum: 'page', pageSize: 'size' },
+    // statusFilter 的默认值是空串（联合类型），必须显式声明成数字
+    numeric: ['statusFilter'],
+  },
+)
+
+onMounted(load)
 </script>
 
 <template>
-  <div class="admin-users">
+  <div class="admin-page admin-users">
     <div class="panel">
       <div class="panel-title">用户管理</div>
       <div class="admin-users__toolbar">
@@ -162,19 +194,20 @@ onMounted(() => {
           v-model="keyword"
           placeholder="昵称 / 店铺名 / 手机号"
           clearable
-          style="width: 260px"
+          style="width: 240px"
           @keyup.enter="search"
           @clear="search"
         />
-        <el-select v-model="statusFilter" filterable placeholder="全部状态" clearable style="width: 150px" @change="search">
+        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" @change="search">
           <el-option v-for="opt in STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
-        <el-button @click="search">查询</el-button>
+        <el-button type="primary" :icon="Search" @click="search">查询</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+        <el-button v-if="hasFilter" text @click="reset">重置</el-button>
         <span class="text-muted admin-users__count">共 {{ total }} 人</span>
       </div>
 
-      <el-table v-loading="loading" :data="list" row-key="id" stripe max-height="560" class="admin-users__table">
+      <el-table v-loading="loading" :data="list" row-key="id" max-height="560" class="admin-users__table admin-table">
         <el-table-column label="用户" min-width="220">
           <template #default="{ row }">
             <div class="admin-users__user">
@@ -183,6 +216,7 @@ onMounted(() => {
                 <p class="admin-users__name">
                   {{ row.nickname }}
                   <el-tag v-if="isAdminUser(row)" size="small" type="success" effect="plain">运营</el-tag>
+                  <el-tag v-else-if="isShopUser(row)" size="small" type="warning" effect="plain">商家</el-tag>
                 </p>
                 <p class="text-muted admin-users__sub">#{{ row.id }} · {{ row.shopName || '个人卖家' }}</p>
               </div>
@@ -196,8 +230,15 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="信用分" width="110" align="center">
           <template #default="{ row }">
-            <p class="text-strong">{{ row.creditScore }}</p>
+            <p class="text-strong" :style="{ color: creditColor(row.creditScore) }">{{ row.creditScore }}</p>
             <p class="text-muted admin-users__sub">{{ row.creditLevelText || '—' }}</p>
+          </template>
+        </el-table-column>
+        <el-table-column label="发布/聊天限额" width="120" align="center">
+          <template #default="{ row }">
+            <span class="text-muted admin-users__sub">
+              {{ row.publishLimit ?? '—' }} / {{ row.chatLimit ?? '—' }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="96" align="center">
@@ -217,27 +258,29 @@ onMounted(() => {
             <span class="admin-users__sub">{{ formatDateTime(row.createdAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="152" align="center">
+        <el-table-column label="操作" width="152" align="center" fixed="right">
           <template #default="{ row }">
             <div class="admin-users__ops">
-              <el-button size="small" @click="openStatus(row)">状态</el-button>
-              <el-button size="small" type="primary" plain @click="openCredit(row)">信用分</el-button>
+              <el-button link size="small" @click="openStatus(row)">状态</el-button>
+              <el-button link size="small" type="primary" @click="openCredit(row)">信用分</el-button>
             </div>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="没有符合条件的用户" />
+          <el-empty :description="hasFilter ? '没有符合条件的用户' : '还没有注册用户'" />
         </template>
       </el-table>
 
       <div v-if="total > 0" class="admin-users__pager">
         <el-pagination
+          v-model:current-page="pageNum"
+          v-model:page-size="pageSize"
           background
-          layout="prev, pager, next, total"
+          layout="prev, pager, next, sizes, total"
           :total="total"
-          :page-size="PAGE_SIZE"
-          :current-page="pageNum"
-          @current-change="changePage"
+          :page-sizes="PAGE_SIZES"
+          @current-change="load"
+          @size-change="search"
         />
       </div>
     </div>
@@ -283,6 +326,10 @@ onMounted(() => {
         <el-form-item label="分值变化">
           <el-input-number v-model="creditDialog.changeValue" :min="-100" :max="100" />
           <span class="text-muted admin-users__hint">正数加分 / 负数扣分，范围 -100 ~ +100</span>
+        </el-form-item>
+        <el-form-item label="调整后">
+          <span class="admin-users__after" :style="{ color: creditColor(creditAfter) }">{{ creditAfter }} 分</span>
+          <span class="text-muted admin-users__hint">（当前 {{ creditDialog.target?.creditScore ?? '—' }} 分）</span>
         </el-form-item>
         <el-form-item label="调整原因">
           <el-input
@@ -366,6 +413,11 @@ onMounted(() => {
   &__hint {
     margin-left: 10px;
     font-size: 12px;
+  }
+
+  &__after {
+    font-size: 15px;
+    font-weight: 700;
   }
 }
 </style>

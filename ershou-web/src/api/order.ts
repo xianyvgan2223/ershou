@@ -29,6 +29,12 @@ export interface OrderVO {
   sellerId: number
   sellerName: string
   remark: string
+  /**
+   * 取消 / 失效原因。
+   * 商品被卖给别人、被下架导致自动作废时，买家在「我的面交」里能直接看到为什么，
+   * 不用翻私聊记录。
+   */
+  cancelReason?: string | null
   createdAt: string
   /** 买家点过「我收到了」（只留痕，成交由卖家确认） */
   buyerConfirmed?: boolean

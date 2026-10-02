@@ -2,12 +2,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import { fetchMyItems, offlineItem, updateItem } from '@/api/item'
+import { Clock, Refresh } from '@element-plus/icons-vue'
+import { fetchMyItems, offlineItem, relistItem, updateItem } from '@/api/item'
 import type { ItemVO } from '@/api/item'
 import {
   ITEM_STATUS,
   conditionLabel,
+  expireText,
+  expireUrgent,
   formatDateTime,
   formatPrice,
   itemStatusLabel,
@@ -29,9 +31,10 @@ const total = ref(0)
 
 // 在售 tab 把「审核中 / 已锁定」也算进来：对卖家来说这些都还没成交，需要能看到
 const TAB_STATUS: Record<StatusTab, number[]> = {
-  on: [ITEM_STATUS.REVIEWING, ITEM_STATUS.ON_SALE, ITEM_STATUS.LOCKED],
+  on: [ITEM_STATUS.DRAFT, ITEM_STATUS.REVIEWING, ITEM_STATUS.ON_SALE, ITEM_STATUS.LOCKED],
   sold: [ITEM_STATUS.SOLD],
-  off: [ITEM_STATUS.OFFLINE, ITEM_STATUS.VIOLATION],
+  // 被驳回（6）和已过期（7）也归到这里：都是「不卖了 / 不能卖了」，但状态标签各自区分
+  off: [ITEM_STATUS.OFFLINE, ITEM_STATUS.REJECTED, ITEM_STATUS.EXPIRED, ITEM_STATUS.VIOLATION],
 }
 
 const tabItems = computed(() =>
@@ -76,7 +79,34 @@ async function handleOffline(item: ItemVO): Promise<void> {
   acting.value = true
   try {
     await offlineItem(item.id)
-    ElMessage.success('已下架')
+    ElMessage.success('已下架，随时可以重新上架')
+    await loadItems()
+  } catch {
+    // 响应拦截器已提示
+  } finally {
+    acting.value = false
+  }
+}
+
+/** 「已下架 / 已过期」能重新挂满有效期；已售出、审核未通过、违规下架都不行 */
+function canRelist(item: ItemVO): boolean {
+  return item.status === ITEM_STATUS.OFFLINE || item.status === ITEM_STATUS.EXPIRED
+}
+
+/** 只有"还在卖"的商品才需要倒计时提醒 */
+function showExpire(item: ItemVO): boolean {
+  return (
+    item.status === ITEM_STATUS.REVIEWING ||
+    item.status === ITEM_STATUS.ON_SALE ||
+    item.status === ITEM_STATUS.LOCKED
+  )
+}
+
+async function handleRelist(item: ItemVO): Promise<void> {
+  acting.value = true
+  try {
+    await relistItem(item.id)
+    ElMessage.success('已重新上架，有效期重新开始计时')
     await loadItems()
   } catch {
     // 响应拦截器已提示
@@ -166,7 +196,7 @@ onMounted(loadItems)
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <el-tab-pane label="在售" name="on" />
       <el-tab-pane label="已售" name="sold" />
-      <el-tab-pane label="已下架" name="off" />
+      <el-tab-pane label="已下架 / 驳回" name="off" />
     </el-tabs>
 
     <div v-loading="loading" class="my-items__body">
@@ -183,15 +213,25 @@ onMounted(loadItems)
               发布：{{ formatDateTime(item.publishedAt) }} · 浏览 {{ item.viewCount }} · 收藏 {{ item.favCount }}
               <template v-if="item.preferPointName"> · 面交点：{{ item.preferPointName }}</template>
             </p>
+            <!-- 有效期倒计时：只在对"还在卖"的商品上有意义（已售出/下架/过期都不提醒） -->
+            <p
+              v-if="showExpire(item)"
+              class="my-items__expire"
+              :class="{ 'is-urgent': expireUrgent(item.expireAt) }"
+            >
+              <el-icon><Clock /></el-icon>
+              {{ expireText(item.expireAt) }}自动下架
+              <span class="my-items__expire-tip">（到期后可一键重新上架）</span>
+            </p>
           </div>
           <el-tag :type="itemStatusTagType(item.status)" effect="plain">
             {{ itemStatusLabel(item.status) }}
           </el-tag>
           <div class="my-items__actions">
             <el-button size="small" @click="router.push(`/item/${item.id}`)">查看</el-button>
-            <!-- 已售出的商品不许改（留着成交记录），在售/已下架都可以改标题和价格 -->
+            <!-- 已售出的商品不许改（留着成交记录），其余状态都可以改标题和价格 -->
             <el-button
-              v-if="item.status !== 4"
+              v-if="item.status !== ITEM_STATUS.SOLD"
               size="small"
               type="primary"
               plain
@@ -199,8 +239,19 @@ onMounted(loadItems)
             >
               编辑
             </el-button>
+            <!-- 已下架 / 已过期：一键重新挂满有效期，不用重填标题图片 -->
             <el-button
-              v-if="item.status === 2"
+              v-if="canRelist(item)"
+              size="small"
+              type="success"
+              plain
+              :loading="acting"
+              @click="handleRelist(item)"
+            >
+              重新上架
+            </el-button>
+            <el-button
+              v-if="item.status === ITEM_STATUS.ON_SALE"
               size="small"
               type="danger"
               plain
@@ -306,9 +357,30 @@ onMounted(loadItems)
     }
   }
 
+  // 有效期倒计时：平时是弱化的灰字，不足 1 天换成警示色
+  &__expire {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-3) !important;
+    font-size: 12px !important;
+
+    &.is-urgent {
+      color: var(--accent-600) !important;
+      font-weight: 600;
+    }
+  }
+
+  &__expire-tip {
+    color: var(--text-3);
+    font-weight: 400;
+  }
+
   &__actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   &__count {

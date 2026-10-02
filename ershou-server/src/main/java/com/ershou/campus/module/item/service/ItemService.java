@@ -15,6 +15,8 @@ import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.ai.AuditDecision;
 import com.ershou.campus.module.ai.AuditResult;
 import com.ershou.campus.module.ai.ContentAuditService;
+import com.ershou.campus.module.admin.entity.ItemReview;
+import com.ershou.campus.module.admin.service.ItemReviewService;
 import com.ershou.campus.module.cart.entity.Favorite;
 import com.ershou.campus.module.cart.mapper.FavoriteMapper;
 import com.ershou.campus.module.item.dto.ItemPublishDTO;
@@ -29,12 +31,14 @@ import com.ershou.campus.module.search.config.SearchProperties;
 import com.ershou.campus.module.search.dto.ItemSearchHits;
 import com.ershou.campus.module.search.service.ItemIndexService;
 import com.ershou.campus.module.search.service.ItemSearchService;
+import com.ershou.campus.module.order.service.OrderService;
 import com.ershou.campus.module.user.entity.SysUser;
 import com.ershou.campus.module.user.service.UserService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -67,8 +71,34 @@ public class ItemService {
     private final CacheEvictor evictor;
     private final DictionaryCache dict;
     private final CacheProperties cacheProps;
+    /** 商品下架时顺手收掉挂在该商品上的约面交单 */
+    private final OrderService orderService;
 
-    private static final int DEFAULT_HOURS_VALID = 60 * 24;
+    /**
+     * 上架审核登记（运营后台「上架审核」页的队列）。
+     *
+     * <p>为什么用字段注入 + {@code @Lazy} 而不是构造器注入：{@code ItemReviewService} 自己也要
+     * 用 {@code ItemMapper}/{@code OrderService}/{@code ItemService.statusText}，
+     * 与本类构成 bean 环。启动期用一个代理把这根环剪断，运行时调用没有任何差别。
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private ItemReviewService itemReviewService;
+
+    /**
+     * 商品有效期（天）。到期后由定时任务置为「已过期」并下架，卖家可一键重新上架。
+     *
+     * <p>历史坑：这里原来是 {@code DEFAULT_HOURS_VALID = 60 * 24}，名字是"小时"、
+     * 用的却是 {@code plusMinutes(...)} —— 商品实际只挂 <b>24 小时</b>，
+     * 而文档一直写着 60 天。单位写错 + 没有测试覆盖，挂了很久没人发现。
+     */
+    @Value("${ershou.item.valid-days:7}")
+    private int validDays = 7;
+
+    /** 商品可挂的天数（详情 / 列表的倒计时与文案都用它，避免前端再写一份魔法数字） */
+    public int getValidDays() {
+        return validDays;
+    }
 
     public PageResult<ItemVO> page(ItemQueryDTO q, Long userId) {
         PageResult<ItemVO> result = queryPage(q);
@@ -142,6 +172,9 @@ public class ItemService {
         }
         if (q.getSellerId() != null) {
             w.eq(Item::getSellerId, q.getSellerId());
+        }
+        if (q.getPreferPointId() != null) {
+            w.eq(Item::getPreferPointId, q.getPreferPointId());
         }
         switch (q.getSort() == null ? "latest" : q.getSort()) {
             case "price_asc" -> w.orderByAsc(Item::getPrice);
@@ -263,15 +296,23 @@ public class ItemService {
         item.setStatus(status);
         item.setAuditResult(audit.decision() == AuditDecision.PASS ? 1 : null);
         item.setAuditReason(audit.reason());
-        item.setExpireAt(LocalDateTime.now().plusMinutes(DEFAULT_HOURS_VALID));
+        item.setExpireAt(LocalDateTime.now().plusDays(validDays));
         item.setPublishedAt(LocalDateTime.now());
         item.setViewCount(0);
         item.setChatCount(0);
         item.setFavCount(0);
         item.setVersion(0);
+        // 上架快照先落成当前内容：有快照才谈得上"之后改没改过"
+        item.setLastLiveTitle(item.getTitle());
+        item.setLastLiveDescHash(ItemReviewService.hash(item.getDescription()));
         itemMapper.insert(item);
         TxHooks.afterCommit(() -> itemIndexService.syncById(item.getId()));
         TxHooks.afterCommit(() -> evictor.itemChanged(item.getId()));
+        // 机审通过 → 直接就在售。此时登记进运营的「上架审核」页，
+        // 由审核员事后确认（不拦截发布，只是让每条上架都有人看过）。
+        if (status == 2) {
+            itemReviewService.onItemLiveOptimistic(item.getId(), ItemReview.TYPE_NEW);
+        }
 
         log.info("[item][publish][{}][{}] status={}", item.getId(), userId, status);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -375,6 +416,10 @@ public class ItemService {
         itemMapper.updateById(update);
         TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
         TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
+        // 在售期间改了标题/描述 → 内容变了等于新内容，重新回到运营的「上架审核」页。
+        // 只改价格/库存/图片不算（审核员确认的是"这条内容挂出来合不合适"，与价格无关），
+        // 所以把 textChanged 直接传下去，不在这里重新判断。
+        itemReviewService.onContentMaybeChanged(itemId, textChanged);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("itemId", itemId);
@@ -400,9 +445,107 @@ public class ItemService {
         update.setId(itemId);
         update.setStatus(5);
         itemMapper.updateById(update);
+        // 商品已下架：挂在上面的约面交意向与待面交单一起收掉，否则买家那边会一直挂着
+        // 「待面交」和一个永不消失的红点（尤其商品原本已锁库时，锁再也等不到释放）
+        int closed = orderService.closeActiveOrders(itemId, "商品已被卖家下架，本次约面交自动作废");
         TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
         TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
-        log.info("[item][offline][{}][{}]", itemId, userId);
+        log.info("[item][offline][{}][{}] 同时作废 {} 张挂单", itemId, userId, closed);
+    }
+
+    /**
+     * 一键重新上架：把「已下架(5)」或「已过期(7)」的商品重新挂 {@code validDays} 天。
+     *
+     * <p>只放开这两种状态，其余各有各的出口：
+     * <ul>
+     *   <li>4 已售出 —— 成交记录要留着，不能再卖</li>
+     *   <li>6 审核未通过 —— 要走「编辑 → 重新过机审」，而不是直接复活</li>
+     *   <li>8 违规下架 —— 运营的处置，卖家不能自己解除</li>
+     * </ul>
+     *
+     * <p>不重新过机审（内容一个字没改，之前已经放行），也不占「每日发布上限」的额度 ——
+     * 这不是新内容，只是把旧内容重新挂出来。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> relist(Long itemId, Long userId) {
+        Item item = itemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BizException(ResultCode.ITEM_NOT_FOUND);
+        }
+        if (!Objects.equals(item.getSellerId(), userId)) {
+            throw new BizException(ResultCode.ITEM_NOT_OWNER);
+        }
+        Integer status = item.getStatus();
+        if (status == null || (status != 5 && status != 7)) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR, "只有「已下架」或「已过期」的商品可以重新上架");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        Item update = new Item();
+        update.setStatus(2);
+        update.setExpireAt(now.plusDays(validDays));
+        // 重新上架算一次新的曝光：列表按 publishedAt 排序，不刷新的话它会一直埋在最后
+        update.setPublishedAt(now);
+        // 条件更新兜并发：两个标签页同时点，只会生效一次
+        int rows = itemMapper.update(update, Wrappers.<Item>lambdaUpdate()
+                .eq(Item::getId, itemId)
+                .in(Item::getStatus, 5, 7));
+        if (rows == 0) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR, "商品状态已变化，请刷新后重试");
+        }
+        TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
+        // 重新上架 = 又一次上架，重新进「上架审核」页。
+        // 走 relist 的只有「已下架(5)/已过期(7)」——卖家自己撤下来或自然到期的内容，
+        // 不代表没问题（可能是他改了名之后再挂出来），所以仍然要让审核员看一眼。
+        itemReviewService.onItemLiveOptimistic(itemId, ItemReview.TYPE_RELIST);
+        log.info("[item][relist][{}][{}] 从 status={} 重新上架，有效期至 {}", itemId, userId, status, update.getExpireAt());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("itemId", itemId);
+        data.put("status", 2);
+        data.put("statusText", statusText(2));
+        data.put("expireAt", update.getExpireAt());
+        return data;
+    }
+
+    /**
+     * 违规商品「二次申请上架」。
+     *
+     * <p>卖家视角：被判定违规下架(8) 之后，商品自己不能解除（{@link #relist} 明确拒绝 8），
+     * 唯一出口是改好内容后点这里提交申请。
+     *
+     * <p>提交后商品进入「审核中(1)」而<b>不是直接重新在售</b> —— 这正是产品口径里
+     * "只有被违规商品二次申请上架要审核"的那一条：在审核员通过之前，它对买家不可见、
+     * 也搜不到。审核员在审核工作台点通过（→ 在售）或驳回（→ 审核未通过）。
+     *
+     * @throws BizException 非本人商品 / 商品不是"违规下架"状态
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> applyRelist(Long itemId, Long userId) {
+        Item item = itemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BizException(ResultCode.ITEM_NOT_FOUND);
+        }
+        if (!Objects.equals(item.getSellerId(), userId)) {
+            throw new BizException(ResultCode.ITEM_NOT_OWNER);
+        }
+        if (item.getStatus() == null || item.getStatus() != 8) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR,
+                    "只有被违规下架的商品需要申请上架；已下架/已过期请直接点「重新上架」");
+        }
+        int rows = itemMapper.applyRelist(itemId);
+        if (rows == 0) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR, "商品状态已变化，请刷新后重试");
+        }
+        TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
+        // 提交通知运营：审核工作台里立刻能看到这条待审（实时推送 + 待办数字）
+        itemReviewService.notifyViolationRelistApplied(itemId, item.getTitle());
+        log.info("[item][apply-relist][{}][{}] 违规商品二次申请上架，已转入审核中", itemId, userId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("itemId", itemId);
+        data.put("status", 1);
+        data.put("statusText", statusText(1));
+        return data;
     }
 
     public Item getOnSale(Long itemId) {
@@ -534,6 +677,7 @@ public class ItemService {
         vo.setViewCount(item.getViewCount());
         vo.setFavCount(item.getFavCount());
         vo.setPublishedAt(item.getPublishedAt());
+        vo.setExpireAt(item.getExpireAt());
         if (item.getCategoryId() != null) {
             vo.setCategoryName(categoryNames.get(item.getCategoryId()));
         }

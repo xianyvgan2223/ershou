@@ -1,0 +1,5 @@
+# Loads the project-root .env at startup so the backend works no matter how it is
+# launched (IDEA Run, scripts/dev-server.ps1, packaged jar).
+# See DotenvEnvironmentPostProcessor for why this exists.
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.ershou.campus.common.config.DotenvEnvironmentPostProcessor

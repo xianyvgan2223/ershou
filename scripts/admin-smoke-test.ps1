@@ -65,6 +65,19 @@ catch { Write-Host '后端未启动，请先运行 .\scripts\dev-server.ps1' -Fo
 # ---------- 0. 登录三个角色 ----------
 Write-Host '=== 0. 登录 运营 / 卖家 / 买家 ===' -ForegroundColor Cyan
 $adminPhone = '13800000009'; $sellerPhone = '13800000008'; $buyerPhone = '13800000007'
+
+# 这个脚本要反复跑，两个"按天"的计数器必须先清：
+#   1) ershou:sms:limit:<手机号>:<yyyyMMdd> —— 同一号码重复取码会被限流
+#   2) ershou:limit:post:<userId>:<yyyyMMdd> —— 每日发布计数
+# 第 2 个是最坑的：脚本原本只把 sys_user.publish_limit 从 5 调到 200，
+# **却没清 Redis 里的当日计数**。反复跑之后计数累到 316 > 200，脚本就整体挂了
+# （症状是"发布返回 20003 / 所有断言都拿到空值"，看着像功能坏了，其实是配额用光）。
+foreach ($ph in @($adminPhone, $sellerPhone, $buyerPhone)) {
+  $keys = @(& docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning KEYS "ershou:sms:limit:$ph`:*" 2>$null |
+            Where-Object { $_ -like 'ershou:*' })
+  if ($keys.Count -gt 0) { & docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning DEL @keys 2>&1 | Out-Null }
+}
+
 Post "$Base/auth/sms-code" @{phone=$adminPhone} | Out-Null
 $adminLogin = Post "$Base/auth/login" @{phone=$adminPhone;code='123456';schoolId=1;campusId=1}
 $adminToken = $adminLogin.data.token; $adminId = $adminLogin.data.user.id
@@ -81,8 +94,15 @@ Sql "update sys_user set role_flags = role_flags | 8 where id = $adminId;"
 Sql "delete from item where seller_id = $sellerId;"
 Sql "delete from trade_point where creator_id in ($sellerId, $buyerId) and source = 2;"
 Sql "update sys_user set credit_score = 100, credit_level = 2, status = 1, ban_until = null where id in ($sellerId, $buyerId);"
-# 测试账号每次都要发 5 件商品，放开"新号每日发布上限"，否则 Redis 计数器累积后本脚本无法重复执行
+# 测试账号每次都要发 5 件商品，放开"新号每日发布上限"，
+# 并把**当日计数**一起清掉 —— 只调大 publish_limit 是没用的（见上面的说明）
 Sql "update sys_user set publish_limit = 200 where id = $sellerId;"
+$postKeys = @(& docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning KEYS "ershou:limit:post:*" 2>$null |
+              Where-Object { $_ -like 'ershou:*' })
+if ($postKeys.Count -gt 0) {
+  & docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning DEL @postKeys 2>&1 | Out-Null
+  Write-Host ("  已清当日发布计数 " + $postKeys.Count + " 个键") -ForegroundColor DarkGray
+}
 
 $AH = @{ Authorization = "Bearer $adminToken" }
 $SH = @{ Authorization = "Bearer $sellerToken" }
@@ -138,24 +158,43 @@ Check '批量通过' $batch.data.success 2
 Check '商品C 状态=2' (DbScalar "select status from item where id=$idC") 2
 Check '商品D 状态=2' (DbScalar "select status from item where id=$idD") 2
 
-# ---------- 4. 点位审核 ----------
-Write-Host '=== 4. 用户提点 → 运营审核 ===' -ForegroundColor Cyan
+# ---------- 4. 点位：免审核 + 运营下架 / 恢复 ----------
+# 面交点已经改成「免审核」：用户提交即通过（audit_status=1）且启用（status=1），
+# 否则买卖双方在地图和私聊里看不到刚建的点。运营的处置手段因此从「审核」
+# 变成了「下架 / 恢复」——本节按当前设计断言。
+Write-Host '=== 4. 用户提点（免审核）→ 运营下架 / 恢复 ===' -ForegroundColor Cyan
 Post "$Base/trade-points/suggest" @{campusId=1;name='冒烟测试点位-通过';coordX=111;coordY=222;guideText='快递柜旁'} $SH | Out-Null
 Post "$Base/trade-points/suggest" @{campusId=1;name='冒烟测试点位-驳回';coordX=333;coordY=444;guideText='无'} $BH | Out-Null
 $p1 = DbScalar "select id from trade_point where creator_id=$sellerId and name='冒烟测试点位-通过' order by id desc limit 1"
 $p2 = DbScalar "select id from trade_point where creator_id=$buyerId and name='冒烟测试点位-驳回' order by id desc limit 1"
-CheckTrue '点位已入库且待审' (($p1 -ne '') -and ((DbScalar "select audit_status from trade_point where id=$p1") -eq 0))
-$pq = Get "$Base/admin/audit/points?auditStatus=0&pageSize=50" $AH
-CheckTrue '待审点位队列包含 P1' (($pq.data.records | ForEach-Object { $_.id }) -contains ([int]$p1))
-Check '点位通过' (Post "$Base/admin/audit/points/$p1/approve" @{safetyScore=88;guideText='东门快递柜旁'} $AH).code 0
-Check 'P1 audit_status=1' (DbScalar "select audit_status from trade_point where id=$p1") 1
-Check 'P1 safety_score=88' (DbScalar "select safety_score from trade_point where id=$p1") 88
+CheckTrue '点位已入库' ($p1 -ne '')
+Check 'P1 创建即通过（免审核）' (DbScalar "select audit_status from trade_point where id=$p1") 1
+Check 'P1 创建即启用' (DbScalar "select status from trade_point where id=$p1") 1
 $tp = Get "$Base/trade-points?campusId=1" $null
 CheckTrue '地图点位列表已出现 P1' (($tp.data | ForEach-Object { $_.id }) -contains ([int]$p1))
-Check '点位驳回' (Post "$Base/admin/audit/points/$p2/reject" @{reasonCode='DUPLICATE';reason='与门卫室重复'} $AH).code 0
-Check 'P2 audit_status=2' (DbScalar "select audit_status from trade_point where id=$p2") 2
+
+# 下架：必须填原因，下架后立刻从地图消失
+Check '下架不填原因应报 10001' (Post "$Base/admin/points/$p1/status" @{status=0} $AH).code 10001
+Check '下架点位' (Post "$Base/admin/points/$p1/status" @{status=0;reason='冒烟测试：与已有面交点重复'} $AH).code 0
+Check 'P1 下架后 status=0' (DbScalar "select status from trade_point where id=$p1") 0
+$tpOff = Get "$Base/trade-points?campusId=1" $null
+CheckTrue '下架后从地图点位列表消失' (-not (($tpOff.data | ForEach-Object { $_.id }) -contains ([int]$p1)))
+$offQueue = Get "$Base/admin/audit/points?auditStatus=-1&status=0&keyword=%E5%86%92%E7%83%9F%E6%B5%8B%E8%AF%95%E7%82%B9%E4%BD%8D-%E9%80%9A%E8%BF%87" $AH
+CheckTrue '运营队列能按「已下架」筛出 P1' (($offQueue.data.records | ForEach-Object { $_.id }) -contains ([int]$p1))
+Check '重复下架应报 60002' (Post "$Base/admin/points/$p1/status" @{status=0;reason='重复下架'} $AH).code 60002
+
+# 恢复：不需要原因，恢复后重新出现在地图上
+Check '恢复点位' (Post "$Base/admin/points/$p1/status" @{status=1} $AH).code 0
+Check 'P1 恢复后 status=1' (DbScalar "select status from trade_point where id=$p1") 1
+$tpOn = Get "$Base/trade-points?campusId=1" $null
+CheckTrue '恢复后重新出现在地图点位列表' (($tpOn.data | ForEach-Object { $_.id }) -contains ([int]$p1))
+
+# 已通过的点位不再走审核流转（审核通过/驳回只对待审的历史数据有意义）
+Check '已通过的点位不能再审核通过' (Post "$Base/admin/audit/points/$p1/approve" @{safetyScore=88} $AH).code 60002
+Check '已通过的点位不能再审核驳回' (Post "$Base/admin/audit/points/$p2/reject" @{reasonCode='DUPLICATE';reason='与门卫室重复'} $AH).code 60002
 # 官方点位 creator_id 为 NULL，列表接口也不能报错
 Check '已通过点位队列（含 creator=NULL 的官方点位）' (Get "$Base/admin/audit/points?auditStatus=1" $AH).code 0
+Check '不限审核状态也能查（auditStatus=-1）' (Get "$Base/admin/audit/points?auditStatus=-1" $AH).code 0
 
 # ---------- 5. 用户管理 ----------
 Write-Host '=== 5. 用户封禁 / 解封 / 信用分 ===' -ForegroundColor Cyan
@@ -188,10 +227,25 @@ Write-Host ("  审计日志 total=" + $logs.data.total) -ForegroundColor DarkGra
 # ---------- 8. 清理 ----------
 Write-Host '=== 8. 清理测试数据 ===' -ForegroundColor Cyan
 Sql "delete from item where seller_id=$sellerId;"
+# 本脚本还会用**运营账号**发一件"商品E"（无面交点的回归用例）。原来只按 seller_id 清，
+# 这一件就永久留下了 —— 实测残留过「测试商品E 加微信转账 未选面交点」。
+Sql "delete from item_review where item_id in (select id from item where title like '测试商品%');"
+Sql "delete from item where title like '测试商品%';"
 Sql "delete from trade_point where id in ($p1,$p2);"
 Sql "delete from credit_log where user_id=$sellerId and reason='冒烟测试加分';"
 Sql "update sys_user set credit_score=100, credit_level=2 where id=$sellerId;"
 Write-Host '  已清理测试商品/点位/信用流水（保留用户与审计日志）' -ForegroundColor DarkGray
+# 概览有 30 秒读缓存，清掉免得后台还显示刚造出来的数字
+& docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning DEL 'ershou:admin:dashboard' 2>&1 | Out-Null
+
+# 清理走的是直接 SQL DELETE，ES 收不到通知 —— 不重建的话索引里会攒下幽灵文档
+# （后果：搜索结果 total 虚高，"共 N 件"却列不出东西）。重建走接口，按当前库重来。
+try {
+  Invoke-RestMethod -Uri "$Base/search/reindex?sync=true" -Method Post -Headers $AH -TimeoutSec 15 | Out-Null
+  Write-Host '  已触发搜索索引重建（清掉本次测试留下的幽灵文档）' -ForegroundColor DarkGray
+} catch {
+  Write-Host '  索引重建触发失败（不影响本次断言，可手动调 POST /api/v1/search/reindex）' -ForegroundColor DarkYellow
+}
 
 Write-Host ''
 if ($script:fail -eq 0) {

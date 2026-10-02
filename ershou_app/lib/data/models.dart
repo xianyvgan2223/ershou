@@ -87,6 +87,7 @@ class Item {
     this.favCount = 0,
     this.favorited = false,
     this.publishedAt = '',
+    this.expireAt = '',
     this.seller,
     this.highlightTitle,
   });
@@ -115,11 +116,27 @@ class Item {
   final int favCount;
   final bool favorited;
   final String publishedAt;
+
+  /// 有效期截止时间（默认发布后 7 天）：用来显示"还剩 X 天自动下架"
+  final String expireAt;
   final Seller? seller;
   final String? highlightTitle;
 
   /// 后端 status=2 且 statusText="在售"（已用真实接口核对）；用文案判断最稳，避免猜错枚举。
   bool get onSale => statusText == '在售' || (statusText.isEmpty && status == 2);
+
+  /// 已下架(5) / 已过期(7)：这两个状态可以一键重新上架
+  bool get canRelist => status == 5 || status == 7;
+
+  /// 还剩几天到期（向上取整）；解析不出来返回 null
+  int? get daysLeft {
+    if (expireAt.isEmpty) return null;
+    final t = DateTime.tryParse(expireAt.replaceFirst(' ', 'T'));
+    if (t == null) return null;
+    final ms = t.difference(DateTime.now()).inMilliseconds;
+    if (ms <= 0) return 0;
+    return (ms / Duration.millisecondsPerDay).ceil();
+  }
 
   factory Item.fromJson(Map<String, dynamic> json) => Item(
         id: (json['id'] as num?)?.toInt() ?? 0,
@@ -149,6 +166,7 @@ class Item {
         favCount: (json['favCount'] as num?)?.toInt() ?? 0,
         favorited: (json['favorited'] as bool?) ?? false,
         publishedAt: (json['publishedAt'] as String?) ?? '',
+        expireAt: (json['expireAt'] as String?) ?? '',
         seller: json['seller'] is Map
             ? Seller.fromJson((json['seller'] as Map).cast<String, dynamic>())
             : null,
@@ -181,6 +199,7 @@ class Item {
         favCount: favCount ?? this.favCount,
         favorited: favorited ?? this.favorited,
         publishedAt: publishedAt,
+        expireAt: expireAt,
         seller: seller,
         highlightTitle: highlightTitle,
       );

@@ -85,6 +85,29 @@ class ChatRepository {
         () => _api.dio.post<dynamic>('/chat/sessions/' + sessionId.toString() + '/read'),
       );
 
+  /// 删除聊天记录（只删自己这一侧；对方再发消息时服务端会自动恢复该会话）。
+  Future<void> deleteSession(int sessionId) => _api.envelope<void>(
+        () => _api.dio.delete<dynamic>('/chat/sessions/' + sessionId.toString()),
+      );
+
+  /// 批量删除聊天记录（多选删除）。
+  ///
+  /// 返回 (成功数, 失败明细)：服务端逐条独立处理，**不会因为一条不是我的会话就整批失败**，
+  /// 所以调用方要能展示"哪几条没删掉"。
+  Future<(int, List<String>)> batchDeleteSessions(List<int> sessionIds) async {
+    final env = await _api.envelope<Map<String, dynamic>>(
+      () => _api.dio.post<dynamic>('/chat/sessions/batch-delete', data: {'ids': sessionIds}),
+      parse: (data) => (data as Map).cast<String, dynamic>(),
+    );
+    final data = env.data ?? const {};
+    final success = (data['success'] as num?)?.toInt() ?? 0;
+    final failures = ((data['failures'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => '${e['id']}：${e['reason'] ?? '删除失败'}')
+        .toList();
+    return (success, failures);
+  }
+
   /// 未读总数（底部导航红点用）
   Future<int> unreadTotal() async {
     final env = await _api.envelope<int>(
@@ -277,6 +300,8 @@ class OrderRepository {
     int pageNum = 1,
     int pageSize = 20,
     int? status,
+    /// 只看某件商品的单子（详情页判断"我约过没有"要用，避免拉一大页再内存过滤）
+    int? itemId,
   }) async {
     final env = await _api.envelope<PageResult<MeetupOrder>>(
       () => _api.dio.get<dynamic>('/meetup-orders', queryParameters: {
@@ -284,6 +309,7 @@ class OrderRepository {
         'pageNum': pageNum,
         'pageSize': pageSize,
         if (status != null) 'status': status,
+        if (itemId != null) 'itemId': itemId,
       }),
       parse: (data) => PageResult.fromJson<MeetupOrder>(
         (data as Map).cast<String, dynamic>(),
@@ -349,22 +375,23 @@ class OrderRepository {
         ),
       );
 
-  /// 查某件商品下"我还需要处理/进行中"的面交单。
+  /// 查某件商品下"进行中"的面交单（1 待确认 / 2 待面交）。
   ///
-  /// 后端没有"按 itemId 查订单"的接口，这里用买/卖两个角色各查一页再按 itemId 过滤。
-  /// 私聊页要显示交易卡片，但只关心这一件商品的单子，量很小。
+  /// ⚠️ 以前是"拉一页 20 条再在内存里过滤 itemId"—— 订单多了就会漏掉目标那一件，
+  /// 于是按钮该灰的时候没灰。现在直接用后端支持的 `itemId` + `status` 过滤。
   Future<MeetupOrder?> activeOrderOfItem(int itemId) async {
     for (final role in const ['buyer', 'seller']) {
-      try {
-        final page = await this.page(role: role, pageSize: 20);
-        for (final order in page.records) {
-          // 1 待卖家确认 / 2 待面交：只有这两个状态允许改地点
-          if (order.itemId == itemId && (order.status == 1 || order.status == 2)) {
-            return order;
+      for (final status in const [1, 2]) {
+        try {
+          final page = await this.page(role: role, itemId: itemId, status: status, pageSize: 5);
+          for (final order in page.records) {
+            if (order.itemId == itemId && (order.status == 1 || order.status == 2)) {
+              return order;
+            }
           }
+        } catch (_) {
+          // 某一个角色/状态查失败不影响其它组合
         }
-      } catch (_) {
-        // 某一个角色查失败不影响另一个
       }
     }
     return null;
@@ -559,6 +586,11 @@ class ItemWriteRepository {
 
   Future<void> offline(int itemId) => _api.envelope<void>(
         () => _api.dio.post<dynamic>('/items/' + itemId.toString() + '/offline'),
+      );
+
+  /// 重新上架：已下架(5) / 已过期(7) 重挂满 7 天（后端不重过机审、不占发布额度）
+  Future<void> relist(int itemId) => _api.envelope<void>(
+        () => _api.dio.post<dynamic>('/items/$itemId/relist'),
       );
 
   /// 上传图片：POST /files/upload（multipart，字段名 file），返回可访问 URL。

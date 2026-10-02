@@ -141,7 +141,9 @@ CREATE TABLE IF NOT EXISTS item (
   reject_code     VARCHAR(32)   DEFAULT NULL,
   lock_user_id    BIGINT        DEFAULT NULL COMMENT '当前锁库用户',
   lock_expire_at  DATETIME      DEFAULT NULL COMMENT '锁库过期时间(30分钟)',
-  expire_at       DATETIME      DEFAULT NULL COMMENT '商品有效期(60天)',
+  last_live_title     VARCHAR(120) DEFAULT NULL COMMENT '上架时（审核员已看过）的标题快照，用于识别在售期间改名',
+  last_live_desc_hash CHAR(32)     DEFAULT NULL COMMENT '上架时的描述 MD5，用于识别在售期间改描述',
+  expire_at       DATETIME      DEFAULT NULL COMMENT '商品有效期截止(默认发布后 7 天，见 ershou.item.valid-days)',
   published_at    DATETIME      DEFAULT NULL,
   view_count      INT           NOT NULL DEFAULT 0,
   chat_count      INT           NOT NULL DEFAULT 0,
@@ -154,6 +156,7 @@ CREATE TABLE IF NOT EXISTS item (
   KEY idx_item_campus_status (campus_id, status, published_at),
   KEY idx_item_category (category_id, status),
   KEY idx_item_lock (status, lock_expire_at),
+  KEY idx_item_expire (status, expire_at),
   KEY idx_item_point (prefer_point_id),
   FULLTEXT KEY ft_item_title (title, description) WITH PARSER ngram
 ) ENGINE=InnoDB COMMENT='商品';
@@ -252,13 +255,19 @@ CREATE TABLE IF NOT EXISTS chat_session (
   unread_a     INT      NOT NULL DEFAULT 0,
   unread_b     INT      NOT NULL DEFAULT 0,
   risk_level   TINYINT  NOT NULL DEFAULT 0 COMMENT '会话风险等级',
-  status       TINYINT  NOT NULL DEFAULT 1,
+  status       TINYINT  NOT NULL DEFAULT 1 COMMENT '1=可发送（canSend 判据，勿与"已删除"混用）',
+  deleted_a    TINYINT  NOT NULL DEFAULT 0 COMMENT 'user_a 是否已从自己列表删除该会话（每用户软删除）',
+  deleted_b    TINYINT  NOT NULL DEFAULT 0 COMMENT 'user_b 是否已从自己列表删除该会话',
+  deleted_a_at DATETIME DEFAULT NULL COMMENT 'user_a 删除时间',
+  deleted_b_at DATETIME DEFAULT NULL COMMENT 'user_b 删除时间',
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_session_pair_item (user_a, user_b, item_id),
   KEY idx_session_a (user_a, last_msg_at),
-  KEY idx_session_b (user_b, last_msg_at)
+  KEY idx_session_b (user_b, last_msg_at),
+  KEY idx_session_user_a_del (user_a, deleted_a),
+  KEY idx_session_user_b_del (user_b, deleted_b)
 ) ENGINE=InnoDB COMMENT='会话';
 
 CREATE TABLE IF NOT EXISTS chat_message (
@@ -441,6 +450,35 @@ CREATE TABLE IF NOT EXISTS sys_audit_log (
   KEY idx_audit_operator (operator_id, created_at),
   KEY idx_audit_target (target_type, target_id)
 ) ENGINE=InnoDB COMMENT='运营操作审计日志';
+
+-- -------------------------------------------------------------
+-- 19.5 上架审核队列（运营后台「上架审核」页）
+-- -------------------------------------------------------------
+-- 商品上架不拦截（发布立即在售），但每条上架都要出现在运营的「上架审核」页
+-- 由审核员逐条确认；在售期间改名/改描述要重新入队；违规下架后二次申请上架必须审核。
+CREATE TABLE IF NOT EXISTS item_review (
+  id                 BIGINT       NOT NULL AUTO_INCREMENT,
+  item_id            BIGINT       NOT NULL COMMENT '商品 id（一个商品只保留一条当前审核记录）',
+  seller_id          BIGINT       DEFAULT NULL COMMENT '卖家 id，冗余便于按人筛选',
+  title              TEXT         DEFAULT NULL COMMENT '入队时的标题快照',
+  review_type        TINYINT      NOT NULL DEFAULT 1 COMMENT '1=新上架 2=改名/改描述 3=到期重新上架 4=违规后二次申请 5=存量导入',
+  revision           INT          NOT NULL DEFAULT 1 COMMENT '内容修订号：每次重新入队 +1',
+  status             TINYINT      NOT NULL DEFAULT 0 COMMENT '0=待审核 1=已审核（默认列表不再显示）',
+  review_action      TINYINT      DEFAULT NULL COMMENT '1=已审核通过 2=已下架',
+  queued_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '本轮入队时间（列表倒序）',
+  first_queued_at    DATETIME     DEFAULT NULL COMMENT '第一次进入审核页的时间',
+  content_changed_at DATETIME     DEFAULT NULL COMMENT '最近一次改名/改描述时间',
+  reviewer_id        BIGINT       DEFAULT NULL COMMENT '审核人；待审时表示当前认领人',
+  claimed_at         DATETIME     DEFAULT NULL COMMENT '认领时间',
+  reviewed_at        DATETIME     DEFAULT NULL COMMENT '处置时间',
+  note               VARCHAR(255) DEFAULT NULL COMMENT '审核备注 / 下架原因',
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_item (item_id),
+  KEY idx_pending (status, queued_at),
+  KEY idx_seller (seller_id, queued_at)
+) ENGINE=InnoDB COMMENT='上架审核队列（运营逐条确认，保证每条商品都被看过）';
 
 -- =============================================================
 -- 初始化数据（可按需执行）

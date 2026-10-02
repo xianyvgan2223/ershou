@@ -67,6 +67,20 @@ public class ItemController {
         return Result.ok();
     }
 
+    @Operation(summary = "重新上架（已下架 / 已过期，重新挂满有效期）")
+    @PostMapping("/{id}/relist")
+    public Result<Map<String, Object>> relist(@PathVariable Long id) {
+        StpUtil.checkLogin();
+        return Result.ok(itemService.relist(id, StpUtil.getLoginIdAsLong()));
+    }
+
+    @Operation(summary = "违规商品二次申请上架（提交后进入审核，审核通过才回到在售）")
+    @PostMapping("/{id}/apply-relist")
+    public Result<Map<String, Object>> applyRelist(@PathVariable Long id) {
+        StpUtil.checkLogin();
+        return Result.ok(itemService.applyRelist(id, StpUtil.getLoginIdAsLong()));
+    }
+
     /** 公开读接口里「登录了就用登录态，没登录就是匿名」：拿不到就返回 null，由服务端按未收藏处理 */
     private Long currentUserId() {
         try {

@@ -1,4 +1,5 @@
-﻿
+﻿param([switch]$Force)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
@@ -44,9 +45,45 @@ function Show($step, $r) {
 
 # 端到端冒烟测试：登录 → 发布（含 AI 机审）→ 购物车 → 合并面交 → 卖家接受（锁库）→ 卖家点已卖出成交
 # 用法： powershell -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
+#   本脚本会**清空 item / meetup_order / cart_item / favorite / credit_log 五张表**（不管是谁的数据）。
+#   默认会先列出受影响的行数并要求确认；无人值守 / CI 用 -Force 跳过确认。
+#   ⚠️ 2026-10-02 事故：这个清库语句原来没有任何确认，跑一次就把演示数据（9 件在售商品）
+#      和历次开发测试数据一起删了。**要保留库里的数据时，先备份**：
+#      mysqldump -h 127.0.0.1 -u root -p ershou > .build\backup-$(Get-Date -f yyyyMMdd-HHmm).sql
 # 前置：后端已在 8080 运行（.\scripts\dev-server.ps1）
+
 Write-Host '=== 0. 清理上一轮测试数据 ===' -ForegroundColor Cyan
+
+function DbCount($sql) {
+  $out = & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -N -B -e "use ershou; $sql" 2>$null
+  return [int](($out | Select-Object -First 1) -replace '\s', '')
+}
+$wipeCounts = [ordered]@{
+  'item（商品）'        = DbCount 'select count(*) from item'
+  'meetup_order（面交单）' = DbCount 'select count(*) from meetup_order'
+  'cart_item（购物车）'  = DbCount 'select count(*) from cart_item'
+  'favorite（收藏）'     = DbCount 'select count(*) from favorite'
+  'credit_log（信用流水）' = DbCount 'select count(*) from credit_log'
+}
+$total = ($wipeCounts.Values | Measure-Object -Sum).Sum
+if ($total -gt 0 -and -not $Force) {
+  Write-Host ''
+  Write-Host '  ⚠️ 本脚本是"直接删库"式冒烟测试，将永久删除以下数据（不是只删测试数据）：' -ForegroundColor Yellow
+  foreach ($k in $wipeCounts.Keys) { Write-Host ("     " + $k.PadRight(24) + $wipeCounts[$k] + ' 行') -ForegroundColor Yellow }
+  Write-Host ('     合计 ' + $total + ' 行；用户(sys_user) 与点位(trade_point) 会保留') -ForegroundColor Yellow
+  Write-Host '     这就是 2026-10-02 演示数据被删的原因。要保留请先 mysqldump 备份。' -ForegroundColor DarkGray
+  Write-Host ''
+  $answer = Read-Host '  确认清空请输入 yes（其它任意输入 = 退出）'
+  if ($answer -ne 'yes') {
+    Write-Host '  已取消，未删除任何数据。' -ForegroundColor Green
+    exit 0
+  }
+}
+
 & $MYSQL -h 127.0.0.1 -P 3306 -u ershou -e "use ershou; delete from meetup_order; delete from cart_item; delete from favorite; delete from item; delete from credit_log; alter table item auto_increment=1; alter table meetup_order auto_increment=1; alter table cart_item auto_increment=1;" 2>&1 | Out-Null
+# 新表也一起清：上架审核队列（item_review）与已删商品是强关联的，
+# 不清的话它的行会变成"孤儿记录"，上架审核页里会出现查不到商品的幽灵条目
+& $MYSQL -h 127.0.0.1 -P 3306 -u ershou -e "use ershou; delete from item_review;" 2>&1 | Out-Null
 # 读缓存必须一起清：本脚本是直接删库，Redis 里商品详情 / 地图点位缓存会盖住刚清掉的数据
 $cacheLua = "for i=1,#ARGV do local ks=redis.call('keys',ARGV[i]); for _,k in ipairs(ks) do redis.call('del',k) end end return 'ok'"
 docker exec ershou-redis redis-cli -a $env:REDIS_PASSWORD --no-auth-warning eval $cacheLua 0 'ershou:item:detail:*' 'ershou:item:null:*' 'ershou:item:view:*' 'ershou:map:points:*' 'ershou:dict:*' 'ershou:admin:dashboard' 2>&1 | Out-Null

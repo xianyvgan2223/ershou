@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import {
   approveAuditItem,
   approveAuditPoint,
@@ -12,44 +11,66 @@ import {
   fetchRejectReasons,
   rejectAuditItem,
   rejectAuditPoint,
+  updatePointStatus,
 } from '@/api/admin'
 import type { AdminItem, AdminPoint, AuditScope, RejectReason } from '@/api/admin'
-import { formatDateTime, formatPrice, formatRelativeTime } from '@/utils/format'
+import { useAdminStore } from '@/stores/admin'
+import { formatDateTime, formatPrice, formatRelativeTime, ITEM_STATUS_OPTIONS } from '@/utils/format'
 import type { TagType } from '@/utils/format'
 import { pointTypeLabel } from '@/api/map'
+import { useQuerySync } from '@/composables/useQuerySync'
+import { showTip } from '@/utils/feedback'
 
-const route = useRoute()
+/**
+ * 审核工作台：商品审核 + 面交点处置。
+ *
+ * 两处历史问题在这里修掉：
+ * 1. 所有行的「通过」按钮共用一个 loading 标志，点一行整屏按钮一起转圈 —— 改成按行记录。
+ * 2. 点位审核通过后没有任何处置出口，页面文案却写着「用于事后追溯与下架」；
+ *    现在补了「下架 / 恢复」，下架会让点位立刻从地图上消失。
+ */
 
 type TabName = 'item' | 'point'
-const activeTab = ref<TabName>(route.query.tab === 'point' ? 'point' : 'item')
-const PAGE_SIZE = 10
 
-const ITEM_STATUS_OPTIONS = [
-  { label: '待审核', value: 1 },
-  { label: '已驳回', value: 6 },
-  { label: '在售', value: 2 },
-  { label: '违规下架', value: 8 },
-]
+const adminStore = useAdminStore()
+const activeTab = ref<TabName>('item')
 
 // ---------------- 商品审核 ----------------
 const itemStatus = ref<number>(1)
 const itemKeyword = ref('')
+const itemPage = ref(1)
 const itemLoading = ref(false)
 const itemList = ref<AdminItem[]>([])
 const itemTotal = ref(0)
-const itemPage = ref(1)
 const selectedItems = ref<AdminItem[]>([])
-const acting = ref(false)
+/** 正在提交的单行商品 id：只让那一行的按钮转圈 */
+const busyItems = ref<number[]>([])
+const batchLoading = ref(false)
 
-// ---------------- 点位审核 ----------------
-const pointStatus = ref<number>(0)
+// ---------------- 点位 ----------------
+// 面交点已改为免审核（创建即生效），所以「待审核」队列平时是空的。
+// 这个 tab 的主要用途是事后处置，默认就把全部审核状态都列出来。
+const POINT_AUDIT_OPTIONS = [
+  { label: '不限审核状态', value: -1 },
+  { label: '待审核', value: 0 },
+  { label: '已通过', value: 1 },
+  { label: '已驳回', value: 2 },
+]
+const POINT_MAP_OPTIONS = [
+  { label: '不限地图状态', value: -1 },
+  { label: '启用中', value: 1 },
+  { label: '已下架', value: 0 },
+]
+const pointStatus = ref<number>(-1)
+const pointMapStatus = ref<number>(-1)
 const pointKeyword = ref('')
+const pointPage = ref(1)
 const pointLoading = ref(false)
 const pointList = ref<AdminPoint[]>([])
 const pointTotal = ref(0)
-const pointPage = ref(1)
+const busyPoints = ref<number[]>([])
 
-// ---------------- 驳回原因模板 ----------------
+// ---------------- 驳回 / 下架原因模板 ----------------
 const reasonOptions = ref<Record<AuditScope, RejectReason[]>>({ item: [], point: [] })
 
 const rejectDialog = reactive({
@@ -70,6 +91,18 @@ const pointDialog = reactive({
   guideText: '',
   loading: false,
 })
+
+/** 下架 / 恢复点位弹窗；下架时复用点位的驳回原因模板 */
+const pointStatusDialog = reactive({
+  visible: false,
+  target: null as AdminPoint | null,
+  status: 0,
+  reasonCode: '',
+  reason: '',
+  loading: false,
+})
+
+const PAGE_SIZE = 10
 
 async function loadReasons(scope: AuditScope): Promise<void> {
   if (reasonOptions.value[scope].length) return
@@ -105,6 +138,7 @@ async function loadPoints(): Promise<void> {
   try {
     const res = await fetchAuditPoints({
       auditStatus: pointStatus.value,
+      status: pointMapStatus.value < 0 ? undefined : pointMapStatus.value,
       keyword: pointKeyword.value.trim() || undefined,
       pageNum: pointPage.value,
       pageSize: PAGE_SIZE,
@@ -129,6 +163,14 @@ function searchPoints(): void {
   loadPoints()
 }
 
+function resetPointFilter(): void {
+  pointStatus.value = -1
+  pointMapStatus.value = -1
+  pointKeyword.value = ''
+  pointPage.value = 1
+  loadPoints()
+}
+
 function handleItemSelection(rows: AdminItem[]): void {
   selectedItems.value = rows
 }
@@ -144,45 +186,49 @@ function toggleReason(code: string): void {
   rejectDialog.reasonCode = rejectDialog.reasonCode === code ? '' : code
 }
 
+function togglePointReason(code: string): void {
+  pointStatusDialog.reasonCode = pointStatusDialog.reasonCode === code ? '' : code
+}
+
 async function approveOne(item: AdminItem): Promise<void> {
-  acting.value = true
+  busyItems.value = [...busyItems.value, item.id]
   try {
     await approveAuditItem(item.id)
-    ElMessage.success('已通过：' + item.title)
-    await loadItems()
+    showTip('已通过：' + item.title, 'success')
+    await Promise.all([loadItems(), adminStore.refresh()])
   } catch {
     // 拦截器已提示
   } finally {
-    acting.value = false
+    busyItems.value = busyItems.value.filter((id) => id !== item.id)
   }
 }
 
 async function batchApprove(): Promise<void> {
   if (!selectedItems.value.length) {
-    ElMessage.warning('请先勾选要通过的商品')
+    showTip('请先勾选要通过的商品', 'warning')
     return
   }
   try {
-    await ElMessageBox.confirm('确定批量通过选中的 ' + selectedItems.value.length + ' 件商品吗？', '批量通过', {
-      confirmButtonText: '确认通过',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      '确定批量通过选中的 ' + selectedItems.value.length + ' 件商品吗？',
+      '批量通过',
+      { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'warning' },
+    )
   } catch {
     return
   }
-  acting.value = true
+  batchLoading.value = true
   try {
     const res = await batchAuditItems({
       ids: selectedItems.value.map((i) => i.id),
       action: 'approve',
     })
-    ElMessage.success('通过 ' + res.success + ' 件' + (res.failed ? '，' + res.failed + ' 件失败' : ''))
-    await loadItems()
+    showTip('通过 ' + res.success + ' 件' + (res.failed ? '，' + res.failed + ' 件失败' : ''), 'success')
+    await Promise.all([loadItems(), adminStore.refresh()])
   } catch {
     // 拦截器已提示
   } finally {
-    acting.value = false
+    batchLoading.value = false
   }
 }
 
@@ -201,7 +247,7 @@ function openRejectItem(item: AdminItem): void {
 
 function openRejectBatch(): void {
   if (!selectedItems.value.length) {
-    ElMessage.warning('请先勾选要驳回的商品')
+    showTip('请先勾选要驳回的商品', 'warning')
     return
   }
   loadReasons('item')
@@ -231,7 +277,7 @@ function openRejectPoint(point: AdminPoint): void {
 
 async function submitReject(): Promise<void> {
   if (!rejectDialog.reasonCode && !rejectDialog.reason.trim()) {
-    ElMessage.warning('请选择驳回原因或填写补充说明')
+    showTip('请选择驳回原因或填写补充说明', 'warning')
     return
   }
   const payload = {
@@ -242,20 +288,20 @@ async function submitReject(): Promise<void> {
   try {
     if (rejectDialog.scope === 'point') {
       await rejectAuditPoint(rejectDialog.targetId, payload)
-      ElMessage.success('点位已驳回')
-      await loadPoints()
+      showTip('点位已驳回', 'success')
+      await Promise.all([loadPoints(), adminStore.refresh()])
     } else if (rejectDialog.mode === 'batch') {
       const res = await batchAuditItems({
         ids: selectedItems.value.map((i) => i.id),
         action: 'reject',
         ...payload,
       })
-      ElMessage.success('驳回 ' + res.success + ' 件' + (res.failed ? '，' + res.failed + ' 件失败' : ''))
-      await loadItems()
+      showTip('驳回 ' + res.success + ' 件' + (res.failed ? '，' + res.failed + ' 件失败' : ''), 'success')
+      await Promise.all([loadItems(), adminStore.refresh()])
     } else {
       await rejectAuditItem(rejectDialog.targetId, payload)
-      ElMessage.success('商品已驳回')
-      await loadItems()
+      showTip('商品已驳回', 'success')
+      await Promise.all([loadItems(), adminStore.refresh()])
     }
     rejectDialog.visible = false
   } catch {
@@ -280,13 +326,55 @@ async function submitPointApprove(): Promise<void> {
       safetyScore: pointDialog.safetyScore,
       guideText: pointDialog.guideText.trim() || undefined,
     })
-    ElMessage.success('点位已通过：' + pointDialog.target.name)
+    showTip('点位已通过：' + pointDialog.target.name, 'success')
     pointDialog.visible = false
-    await loadPoints()
+    await Promise.all([loadPoints(), adminStore.refresh()])
   } catch {
     // 拦截器已提示
   } finally {
     pointDialog.loading = false
+  }
+}
+
+/** 打开下架 / 恢复弹窗：恢复不需要填原因，下架必须填 */
+function openPointStatus(point: AdminPoint, status: 0 | 1): void {
+  if (status === 0) loadReasons('point')
+  Object.assign(pointStatusDialog, {
+    visible: true,
+    target: point,
+    status,
+    reasonCode: '',
+    reason: '',
+  })
+}
+
+async function submitPointStatus(): Promise<void> {
+  const target = pointStatusDialog.target
+  if (!target) return
+  const reason = pointStatusDialog.reason.trim()
+  if (pointStatusDialog.status === 0 && !pointStatusDialog.reasonCode && !reason) {
+    showTip('请选择下架原因或填写补充说明', 'warning')
+    return
+  }
+  // 模板原因 + 补充说明拼成一句话存进审计日志
+  const label = reasonOptions.value.point.find((r) => r.code === pointStatusDialog.reasonCode)?.label
+  const composed = [label, reason].filter(Boolean).join('：')
+
+  pointStatusDialog.loading = true
+  busyPoints.value = [...busyPoints.value, target.id]
+  try {
+    await updatePointStatus(target.id, {
+      status: pointStatusDialog.status,
+      reason: composed || undefined,
+    })
+    showTip(pointStatusDialog.status === 0 ? '点位已下架' : '点位已恢复', 'success')
+    pointStatusDialog.visible = false
+    await Promise.all([loadPoints(), adminStore.refresh()])
+  } catch {
+    // 拦截器已提示
+  } finally {
+    pointStatusDialog.loading = false
+    busyPoints.value = busyPoints.value.filter((id) => id !== target.id)
   }
 }
 
@@ -314,6 +402,29 @@ function pointAuditText(status?: number): string {
   return status === 1 ? '已通过' : '已驳回'
 }
 
+/** 只有「审核通过且地图启用」的点位才是真正在地图上生效的 */
+function pointLive(point: AdminPoint): boolean {
+  return point.auditStatus === 1 && point.status === 1
+}
+
+/**
+ * 坐标展示：用户提交的点位基本只有经纬度（第三方地图），官方点位才有自绘底图的像素坐标。
+ * 以前不管有没有都直接拼 `coordX, coordY`，结果是一列「., .」。
+ */
+function pointCoordText(point: AdminPoint): string {
+  if (point.lng != null && point.lat != null) {
+    return `${Number(point.lng).toFixed(5)}, ${Number(point.lat).toFixed(5)}`
+  }
+  if (point.coordX != null && point.coordY != null) {
+    return `${Math.round(Number(point.coordX))}, ${Math.round(Number(point.coordY))}`
+  }
+  return '—'
+}
+
+const itemEmptyText = computed(() =>
+  itemStatus.value === 1 ? '待审队列是空的，目前没有需要人工复核的商品' : '没有符合条件的商品',
+)
+
 function changeItemPage(page: number): void {
   itemPage.value = page
   loadItems()
@@ -324,6 +435,30 @@ function changePointPage(page: number): void {
   loadPoints()
 }
 
+/** tab 与筛选状态都进 URL：概览页卡片可以直接跳到「已下架点位」这种视图 */
+useQuerySync(
+  { activeTab, itemStatus, itemKeyword, itemPage, pointStatus, pointMapStatus, pointKeyword, pointPage },
+  {
+    activeTab: 'item' as TabName,
+    itemStatus: 1,
+    itemKeyword: '',
+    itemPage: 1,
+    pointStatus: -1,
+    pointMapStatus: -1,
+    pointKeyword: '',
+    pointPage: 1,
+  },
+  {
+    onChange: () => {
+      // 外部改的是哪一半就刷哪一半，避免白打一次接口
+      loadItems()
+      loadPoints()
+    },
+    // 内部字段名 -> 短 URL 参数名，方便概览页卡片直接深链过来
+    aliases: { activeTab: 'tab', itemStatus: 'status', itemKeyword: 'keyword', itemPage: 'page' },
+  },
+)
+
 onMounted(() => {
   loadItems()
   loadPoints()
@@ -331,25 +466,25 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="audit">
+  <div class="admin-page audit">
     <div class="panel audit__intro">
       <div class="panel-title">审核工作台</div>
       <p class="text-muted">
-        商品发布时先过 AI 机审：命中禁售词直接拦截，可疑内容进入"审核中"等待人工处置。
-        面交点已改为<b>免审核</b>（用户自定义地点创建即生效，买卖双方立刻可见），
-        点位 tab 保留用于<b>事后追溯与下架</b>违规点位。
+        商品发布时先过 AI 机审：命中禁售词直接拦截，可疑内容进入「审核中」等待人工处置。
+        面交点已改为<b>免审核</b>（用户自定义地点创建即生效），「点位处置」tab 用于<b>事后追溯</b>：
+        发现不合适的点位可以直接<b>下架</b>（立刻从地图消失），误伤了也能恢复。
       </p>
     </div>
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="商品审核" name="item" />
-      <el-tab-pane label="点位审核" name="point" />
+      <el-tab-pane label="点位处置" name="point" />
     </el-tabs>
 
     <!-- ---------------- 商品 ---------------- -->
-    <div v-show="activeTab === 'item'" class="panel">
+    <div v-show="activeTab === 'item'" class="panel audit__panel audit__panel--item">
       <div class="audit__toolbar">
-        <el-select v-model="itemStatus" filterable style="width: 140px" @change="searchItems">
+        <el-select v-model="itemStatus" style="width: 160px" @change="searchItems">
           <el-option v-for="opt in ITEM_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-input
@@ -360,12 +495,17 @@ onMounted(() => {
           @keyup.enter="searchItems"
           @clear="searchItems"
         />
-        <el-button @click="searchItems">查询</el-button>
+        <el-button type="primary" :icon="Search" @click="searchItems">查询</el-button>
         <el-button :icon="Refresh" :loading="itemLoading" @click="loadItems">刷新</el-button>
         <div class="audit__toolbar-right">
           <span class="audit__count">共 {{ itemTotal }} 件</span>
           <span v-if="selectedItems.length" class="audit__chip">已选 {{ selectedItems.length }} 件</span>
-          <el-button type="primary" :disabled="!selectedItems.length" :loading="acting" @click="batchApprove">
+          <el-button
+            type="primary"
+            :disabled="!selectedItems.length"
+            :loading="batchLoading"
+            @click="batchApprove"
+          >
             批量通过
           </el-button>
           <el-button type="danger" plain :disabled="!selectedItems.length" @click="openRejectBatch">
@@ -378,12 +518,11 @@ onMounted(() => {
         v-loading="itemLoading"
         :data="itemList"
         row-key="id"
-        stripe
         max-height="560"
-        class="audit__table"
+        class="audit__table admin-table"
         @selection-change="handleItemSelection"
       >
-        <el-table-column type="selection" width="46" />
+        <el-table-column type="selection" width="46" :selectable="(row: AdminItem) => row.status === 1" />
         <el-table-column label="商品" min-width="290">
           <template #default="{ row }">
             <div class="audit__item">
@@ -395,7 +534,11 @@ onMounted(() => {
                 hide-on-click-modal
                 fit="cover"
                 class="audit__cover"
-              />
+              >
+                <template #error>
+                  <div class="audit__cover-empty">无图</div>
+                </template>
+              </el-image>
               <div class="audit__item-info">
                 <a
                   class="audit__item-title"
@@ -434,24 +577,29 @@ onMounted(() => {
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="96" align="center">
+        <el-table-column label="状态" width="104" align="center">
           <template #default="{ row }">
             <el-tag :type="itemStatusType(row.status)" effect="plain" class="audit__tag">{{ row.statusText }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="152" align="center">
+        <el-table-column label="操作" width="152" align="center" fixed="right">
           <template #default="{ row }">
             <div v-if="row.status === 1" class="audit__ops">
-              <el-button size="small" type="primary" :loading="acting" @click="approveOne(row)">通过</el-button>
-              <el-button size="small" type="danger" plain @click="openRejectItem(row)">驳回</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                :loading="busyItems.includes(row.id)"
+                @click="approveOne(row)"
+              >
+                通过
+              </el-button>
+              <el-button link size="small" type="danger" @click="openRejectItem(row)">驳回</el-button>
             </div>
             <span v-else class="text-muted">已处置</span>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty
-            :description="itemStatus === 1 ? '待审队列是空的，目前没有需要人工复核的商品' : '没有符合条件的商品'"
-          />
+          <el-empty :description="itemEmptyText" />
         </template>
       </el-table>
 
@@ -468,27 +616,29 @@ onMounted(() => {
     </div>
 
     <!-- ---------------- 点位 ---------------- -->
-    <div v-show="activeTab === 'point'" class="panel">
+    <div v-show="activeTab === 'point'" class="panel audit__panel audit__panel--point">
       <div class="audit__toolbar">
-        <el-select v-model="pointStatus" filterable style="width: 140px" @change="searchPoints">
-          <el-option label="待审核" :value="0" />
-          <el-option label="已通过" :value="1" />
-          <el-option label="已驳回" :value="2" />
+        <el-select v-model="pointStatus" style="width: 160px" @change="searchPoints">
+          <el-option v-for="opt in POINT_AUDIT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
+        <el-select v-model="pointMapStatus" style="width: 150px" @change="searchPoints">
+          <el-option v-for="opt in POINT_MAP_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-input
           v-model="pointKeyword"
           placeholder="搜索点位名称"
           clearable
-          style="width: 220px"
+          style="width: 200px"
           @keyup.enter="searchPoints"
           @clear="searchPoints"
         />
-        <el-button @click="searchPoints">查询</el-button>
+        <el-button type="primary" :icon="Search" @click="searchPoints">查询</el-button>
         <el-button :icon="Refresh" :loading="pointLoading" @click="loadPoints">刷新</el-button>
+        <el-button text @click="resetPointFilter">重置</el-button>
         <span class="audit__count audit__count--right">共 {{ pointTotal }} 个</span>
       </div>
 
-      <el-table v-loading="pointLoading" :data="pointList" row-key="id" stripe max-height="560" class="audit__table">
+      <el-table v-loading="pointLoading" :data="pointList" row-key="id" max-height="560" class="audit__table admin-table">
         <el-table-column label="点位" min-width="190">
           <template #default="{ row }">
             <p class="audit__strong">{{ row.name }}</p>
@@ -497,43 +647,71 @@ onMounted(() => {
             </p>
           </template>
         </el-table-column>
-        <el-table-column label="坐标" width="120">
+        <el-table-column label="坐标" width="132">
           <template #default="{ row }">
-            <span class="text-muted audit__sub">{{ row.coordX }}, {{ row.coordY }}</span>
+            <span class="text-muted audit__sub">{{ pointCoordText(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="安全分" width="84" align="center">
+        <el-table-column label="安全分" width="80" align="center">
           <template #default="{ row }">{{ row.safetyScore ?? '—' }}</template>
         </el-table-column>
-        <el-table-column label="图文指引" min-width="180" show-overflow-tooltip>
+        <el-table-column label="图文指引" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             <span :class="{ 'text-muted': !row.guideText }">{{ row.guideText || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="提交人" min-width="110">
+        <el-table-column label="提交人" min-width="100">
           <template #default="{ row }">
             {{ row.creatorNickname || (row.creatorId ? '#' + row.creatorId : '官方') }}
           </template>
         </el-table-column>
-        <el-table-column label="提交时间" width="145">
+        <el-table-column label="提交时间" width="130">
           <template #default="{ row }">
             <span class="audit__sub">{{ formatDateTime(row.createdAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="96" align="center">
+        <el-table-column label="审核" width="84" align="center">
           <template #default="{ row }">
             <el-tag :type="pointAuditType(row.auditStatus)" effect="plain" class="audit__tag">
               {{ pointAuditText(row.auditStatus) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="152" align="center">
+        <el-table-column label="地图" width="84" align="center">
+          <template #default="{ row }">
+            <el-tag :type="pointLive(row) ? 'success' : 'info'" effect="plain" class="audit__tag">
+              {{ pointLive(row) ? '生效中' : '未上架' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" align="center" fixed="right">
           <template #default="{ row }">
             <div v-if="row.auditStatus === 0" class="audit__ops">
-              <el-button size="small" type="primary" @click="openPointApprove(row)">通过</el-button>
-              <el-button size="small" type="danger" plain @click="openRejectPoint(row)">驳回</el-button>
+              <el-button link size="small" type="primary" @click="openPointApprove(row)">通过</el-button>
+              <el-button link size="small" type="danger" @click="openRejectPoint(row)">驳回</el-button>
             </div>
-            <span v-else class="text-muted">已处置</span>
+            <div v-else-if="row.status === 1" class="audit__ops">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :loading="busyPoints.includes(row.id)"
+                @click="openPointStatus(row, 0)"
+              >
+                下架
+              </el-button>
+            </div>
+            <div v-else class="audit__ops">
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :loading="busyPoints.includes(row.id)"
+                @click="openPointStatus(row, 1)"
+              >
+                恢复
+              </el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -614,6 +792,63 @@ onMounted(() => {
         <el-button type="primary" :loading="pointDialog.loading" @click="submitPointApprove">确认通过</el-button>
       </template>
     </el-dialog>
+
+    <!-- ---------------- 点位下架 / 恢复弹窗 ---------------- -->
+    <el-dialog
+      v-model="pointStatusDialog.visible"
+      :title="pointStatusDialog.status === 0 ? '下架点位' : '恢复点位'"
+      width="520px"
+    >
+      <p class="text-muted audit__dialog-target">
+        点位：{{ pointStatusDialog.target?.name }}
+        <template v-if="pointStatusDialog.status === 0">
+          · 下架后立刻从地图上消失，已约好面交的订单不受影响
+        </template>
+      </p>
+      <el-form v-if="pointStatusDialog.status === 0" label-width="90px">
+        <el-form-item label="下架原因">
+          <div class="audit__reasons">
+            <el-tag
+              v-for="r in reasonOptions.point"
+              :key="r.code"
+              class="audit__reason"
+              :type="pointStatusDialog.reasonCode === r.code ? 'danger' : 'info'"
+              :effect="pointStatusDialog.reasonCode === r.code ? 'dark' : 'plain'"
+              @click="togglePointReason(r.code)"
+            >
+              {{ r.label }}
+            </el-tag>
+          </div>
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input
+            v-model="pointStatusDialog.reason"
+            type="textarea"
+            :rows="3"
+            maxlength="120"
+            show-word-limit
+            placeholder="选填，与上面选中的原因一起记入操作日志"
+          />
+        </el-form-item>
+      </el-form>
+      <el-alert
+        v-else
+        type="info"
+        :closable="false"
+        show-icon
+        title="恢复后点位会重新出现在地图上，同学可以继续把它选为面交地点"
+      />
+      <template #footer>
+        <el-button @click="pointStatusDialog.visible = false">取消</el-button>
+        <el-button
+          :type="pointStatusDialog.status === 0 ? 'danger' : 'primary'"
+          :loading="pointStatusDialog.loading"
+          @click="submitPointStatus"
+        >
+          {{ pointStatusDialog.status === 0 ? '确认下架' : '确认恢复' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -653,6 +888,16 @@ onMounted(() => {
     height: 48px;
     border-radius: 8px;
     flex-shrink: 0;
+  }
+
+  &__cover-empty {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    background: var(--surface-2);
+    color: var(--text-3);
+    font-size: 10px;
   }
 
   &__item-info {

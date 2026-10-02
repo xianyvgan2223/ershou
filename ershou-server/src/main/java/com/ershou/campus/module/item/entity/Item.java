@@ -36,6 +36,12 @@ public class Item {
     private String rejectCode;
     private Long lockUserId;
     private LocalDateTime lockExpireAt;
+    /**
+     * 上架时（审核员已看过）的标题与描述哈希快照，见 {@code item_review} 表。
+     * 在售期间这两者与当前内容对不上 = 卖家改过名 → 重新进「上架审核」页。
+     */
+    private String lastLiveTitle;
+    private String lastLiveDescHash;
     private LocalDateTime expireAt;
     private LocalDateTime publishedAt;
     private Integer viewCount;

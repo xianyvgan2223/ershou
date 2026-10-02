@@ -33,6 +33,8 @@ public class ItemVO {
     /** 当前登录用户是否已收藏（未登录恒为 false；列表 / 详情接口都会返回） */
     private Boolean favorited = false;
     private LocalDateTime publishedAt;
+    /** 有效期截止时间：前端据此显示「还剩 X 天自动下架」 */
+    private LocalDateTime expireAt;
     private SellerVO seller;
     /** 搜索命中时的标题高亮片段（只含 <em> 标签，ES 已做 HTML 转义） */
     private String highlightTitle;

@@ -142,6 +142,13 @@ class ChatCache {
     await _dao.trimScope(scope, keep: keep);
   }
 
+  /// 删除单个会话的本地镜像（会话行 + 消息 + 同步水位）。
+  /// 不删的话，冷启动时会先渲染本地镜像，用户会觉得"删了的会话又回来了"。
+  Future<void> deleteSession(String scope, int sessionId) async {
+    if (scope.isEmpty) return;
+    await _dao.deleteSession(scope, sessionId);
+  }
+
   Future<void> clearScope(String scope) async {
     if (scope.isEmpty) return;
     await _dao.clearScope(scope);

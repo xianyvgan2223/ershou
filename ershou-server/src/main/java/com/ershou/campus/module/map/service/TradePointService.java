@@ -407,6 +407,13 @@ public class TradePointService {
             TradePointVO vo = toVO(p);
             List<Item> list = grouped.getOrDefault(p.getId(), List.of());
             vo.setItemCount(list.size());
+            // 「在售」口径单独给一个数：itemCount 是"还有戏"（含**审核中**的草稿态商品），
+            // 而买家在商品列表里只看得到在售的。两个数混用会出现
+            // "气泡写着 11 件在售、点开小窗只有 10 件"这种自相矛盾的展示。
+            // 清理空点位等运营逻辑仍然用 itemCount（它要算上审核中的，见 cleanupEmptyPoints）。
+            vo.setOnSaleCount((int) list.stream()
+                    .filter(i -> i.getStatus() != null && i.getStatus() == 2)
+                    .count());
             vo.setMinPrice(list.stream().map(Item::getPrice).filter(Objects::nonNull)
                     .min(BigDecimal::compareTo).orElse(null));
             return vo;
@@ -416,15 +423,20 @@ public class TradePointService {
     /**
      * 取一个校区里"还有戏"的商品，按面交点分组。
      *
-     * <p>只捞 id / preferPointId / price 三列（不 select *），所以即使一个校区几万件在售，
-     * 传输量也可控；配合 (campus_id, status) 索引，现算一次聚合是几十毫秒级。
+     * <p>只捞需要的几列（不 select *），所以即使一个校区几万件在售，传输量也可控；
+     * 配合 (campus_id, status) 索引，现算一次聚合是几十毫秒级。
+     *
+     * <p>⚠️ **`status` 必须在 select 里**：它既用于 WHERE 也用于上层算"买家可见数"
+     * （在售件数）。只 select id/preferPointId/price 时实体的 status 是 null，
+     * 上层 `status == 2` 的过滤会把所有商品都排除掉，`onSaleCount` 恒为 0 ——
+     * 编译没问题、接口也不报错，只是数字静默变成 0。
      */
     private Map<Long, List<Item>> activeItemsByPoint(Long campusId) {
         List<Item> items = itemMapper.selectList(Wrappers.<Item>lambdaQuery()
                 .eq(Item::getCampusId, campusId)
                 .in(Item::getStatus, ITEM_ACTIVE_STATUS)
                 .isNotNull(Item::getPreferPointId)
-                .select(Item::getId, Item::getPreferPointId, Item::getPrice));
+                .select(Item::getId, Item::getPreferPointId, Item::getPrice, Item::getStatus));
         return items.stream().collect(Collectors.groupingBy(Item::getPreferPointId));
     }
 

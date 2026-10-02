@@ -4,20 +4,25 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
   ChatDotRound,
+  Delete,
   Location,
   ShoppingCart,
   Star,
   StarFilled,
 } from '@element-plus/icons-vue'
-import { addFavorite, fetchItemDetail, removeFavorite } from '@/api/item'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { addFavorite, fetchItemDetail, offlineItem, removeFavorite } from '@/api/item'
 import type { ItemVO } from '@/api/item'
+import { forceOfflineItem } from '@/api/admin'
 import { addToCart } from '@/api/cart'
 import { openChatSession } from '@/api/chat'
+import { fetchMeetupOrders } from '@/api/order'
+import type { OrderVO } from '@/api/order'
 import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
-import { conditionLabel, formatDateTime, formatPrice, nameInitial } from '@/utils/format'
+import { conditionLabel, expireText, expireUrgent, formatDateTime, formatPrice, nameInitial } from '@/utils/format'
 import { showTip } from '@/utils/feedback'
 
 const route = useRoute()
@@ -110,6 +115,124 @@ async function handleAddCart(): Promise<void> {
 /** 可面交：在售 + 不是自己发布的 */
 const canBook = computed(() => item.value?.status === 2 && item.value?.seller?.id !== userStore.profile?.id)
 
+/** 我是不是这件商品的卖家 */
+const isOwner = computed(
+  () => !!item.value && !!userStore.profile && item.value.seller?.id === userStore.profile.id,
+)
+
+/**
+ * 还能被下架的状态：审核中 / 在售 / 已锁定 / 审核未通过。
+ * 已售出(4) 要留成交记录，已下架(5) / 已过期(7) / 违规下架(8) 都是终态。
+ */
+const OFFLINEABLE_STATUS = [1, 2, 3, 6]
+const offlineable = computed(
+  () => !!item.value && OFFLINEABLE_STATUS.includes(item.value.status as number),
+)
+
+/** 卖家下架自己的商品（从商品详情页直接操作，不用绕回「我的发布」） */
+const offlineLoading = ref(false)
+async function handleOffline(): Promise<void> {
+  const current = item.value
+  if (!current) return
+  try {
+    await ElMessageBox.confirm(
+      `下架后「${current.title}」在首页和搜索里都看不到了，已经约好的面交单也会一起作废。确定下架吗？`,
+      '下架商品',
+      { confirmButtonText: '确认下架', cancelButtonText: '再想想', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  offlineLoading.value = true
+  try {
+    await offlineItem(current.id)
+    ElMessage.success('已下架，可在「我的发布」重新上架')
+    await loadItem()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    offlineLoading.value = false
+  }
+}
+
+/**
+ * 运营强制下架任意商品。
+ *
+ * <p>以前只能进 `/admin/items` 列表里找这件商品才能处置，运营在逛的时候发现违规商品
+ * 得先记下 id 再回去搜。这里直接给入口，走后端同一个 `POST /admin/items/{id}/offline`，
+ * 原因必填（会写进 `audit_reason` 与操作日志）。
+ */
+const adminOfflineLoading = ref(false)
+async function handleAdminOffline(): Promise<void> {
+  const current = item.value
+  if (!current) return
+  let reason = ''
+  try {
+    const result = await ElMessageBox.prompt(
+      `违规下架「${current.title}」：请填写原因，会写进商品的审核原因和操作日志。`,
+      '运营强制下架',
+      {
+        confirmButtonText: '确认下架',
+        cancelButtonText: '取消',
+        inputPlaceholder: '例如：含站外联系方式 / 疑似违禁品',
+        inputValidator: (value: string) => (value && value.trim().length > 0 ? true : '请填写下架原因'),
+      },
+    )
+    reason = result.value
+  } catch {
+    return
+  }
+  adminOfflineLoading.value = true
+  try {
+    await forceOfflineItem(current.id, reason.trim())
+    ElMessage.success('已强制下架')
+    await loadItem()
+  } catch {
+    // 拦截器已提示
+  } finally {
+    adminOfflineLoading.value = false
+  }
+}
+
+/** 有效期倒计时：只给卖家本人和运营看（买家不关心卖家什么时候到期） */
+const showExpire = computed(() => (isOwner.value || userStore.isAdmin) && offlineable.value)
+const expireLabel = computed(() => expireText(item.value?.expireAt))
+const expireIsUrgent = computed(() => expireUrgent(item.value?.expireAt))
+
+/**
+ * 我在这件商品上是否已经有**进行中**的面交单（1 待确认 / 2 待面交）。
+ *
+ * <p>没有这个状态时买家可以反复点「约面交」刷出一堆重复单（后端也是这次才补的防重），
+ * 而且按钮一直亮着，用户不知道到底约上没有。现在：约过就把按钮灰掉并改文案。</p>
+ */
+const myActiveOrder = ref<OrderVO | null>(null)
+const bookDisabled = computed(() => !canBook.value || !!myActiveOrder.value)
+const bookText = computed(() => {
+  if (myActiveOrder.value) {
+    return myActiveOrder.value.status === 2 ? '已约好，待面交' : '已约，等卖家确认'
+  }
+  if (item.value?.status === 4) return '已售出'
+  if (item.value?.status === 3) return '已被约走'
+  if (item.value?.status !== 2) return item.value?.statusText || '不可面交'
+  return '约面交'
+})
+
+/** 查我在这件商品上的进行中面交单；登录了才有意义 */
+async function loadMyOrder(): Promise<void> {
+  const current = item.value
+  if (!current || !userStore.isLogin) {
+    myActiveOrder.value = null
+    return
+  }
+  try {
+    const page = await fetchMeetupOrders({ role: 'buyer', itemId: current.id, pageNum: 1, pageSize: 10 })
+    myActiveOrder.value = page.records.find((o) => o.status === 1 || o.status === 2) ?? null
+  } catch {
+    // 查不到就当没有：不要因为一个探测请求失败把「约面交」按钮也禁掉
+    myActiveOrder.value = null
+  }
+}
+
 /**
  * 「约面交」直接开预约弹窗（后端 POST /meetup-orders）。
  * 之前这里只是加购物车再跳转，用户还得自己勾选、再找结算入口，等于约不成。
@@ -121,6 +244,11 @@ function openBooking(): void {
     showTip('这是你自己发布的商品', 'warning')
     return
   }
+  if (myActiveOrder.value) {
+    showTip('你已经约过这件商品了，等卖家确认就行（想改细节去私聊）', 'warning')
+    router.push('/orders')
+    return
+  }
   if (current.status !== 2) {
     showTip(`商品${current.statusText || '当前不可面交'}，先在"我的收藏"里等它回来吧`, 'warning')
     return
@@ -128,8 +256,10 @@ function openBooking(): void {
   bookingVisible.value = true
 }
 
-function handleBooked(): void {
+async function handleBooked(): Promise<void> {
   showTip('面交单已提交，等卖家确认')
+  // 立刻刷新按钮状态：刚约过的商品按钮该灰掉，不能让用户再点一次
+  await loadMyOrder()
   router.push('/orders')
 }
 
@@ -154,7 +284,11 @@ async function handleChat(): Promise<void> {
   }
 }
 
-onMounted(loadItem)
+onMounted(async () => {
+  await loadItem()
+  // 商品加载完再查"我约过没有"：按钮要能显示成"已约，等卖家确认"并置灰
+  await loadMyOrder()
+})
 </script>
 
 <template>
@@ -203,6 +337,10 @@ onMounted(loadItem)
             <li><span>发布</span>{{ formatDateTime(item.publishedAt) }}</li>
             <li><span>浏览</span>{{ item.viewCount ?? 0 }}</li>
             <li><span>收藏</span>{{ item.favCount ?? 0 }}</li>
+            <!-- 有效期只给卖家本人和运营看：买家不关心卖家什么时候到期 -->
+            <li v-if="showExpire && expireLabel" :class="{ 'meta__expire--urgent': expireIsUrgent }">
+              <span>有效期</span>{{ expireLabel }}自动下架
+            </li>
           </ul>
 
           <div class="point">
@@ -221,8 +359,14 @@ onMounted(loadItem)
           </div>
 
           <div class="actions">
-            <el-button class="actions__primary" size="large" :disabled="!canBook" @click="openBooking">
-              约面交
+            <!-- 已经约过就灰掉并改文案：反复点会刷出一堆重复单（后端也补了防重） -->
+            <el-button
+              class="actions__primary"
+              size="large"
+              :disabled="bookDisabled"
+              @click="openBooking"
+            >
+              {{ bookText }}
             </el-button>
             <el-button size="large" :icon="ShoppingCart" :loading="cartLoading" @click="handleAddCart">
               加入购物车
@@ -232,6 +376,31 @@ onMounted(loadItem)
               <el-icon><StarFilled v-if="favorited" /><Star v-else /></el-icon>
               <span>{{ favorited ? '已收藏' : '收藏' }}</span>
             </button>
+
+            <!-- 卖家：直接在自己商品的详情页下架（不用绕回「我的发布」） -->
+            <el-button
+              v-if="isOwner && offlineable"
+              size="large"
+              type="danger"
+              plain
+              :icon="Delete"
+              :loading="offlineLoading"
+              @click="handleOffline"
+            >
+              下架商品
+            </el-button>
+
+            <!-- 运营：任意商品都能直接强制下架，原因必填 -->
+            <el-button
+              v-if="userStore.isAdmin && offlineable"
+              size="large"
+              type="danger"
+              :icon="Delete"
+              :loading="adminOfflineLoading"
+              @click="handleAdminOffline"
+            >
+              运营下架
+            </el-button>
           </div>
         </div>
       </section>
@@ -449,6 +618,17 @@ onMounted(loadItem)
 
   span {
     color: var(--text-3);
+  }
+
+  // 有效期临近（不足 1 天）：换成警示色，卖家一眼能看到
+  &__expire--urgent {
+    color: var(--accent-600);
+    font-weight: 600;
+
+    span {
+      color: var(--accent-600);
+      opacity: 0.75;
+    }
   }
 }
 

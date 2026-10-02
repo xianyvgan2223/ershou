@@ -271,6 +271,10 @@ class _PublishPageState extends ConsumerState<PublishPage> {
             16,
           ),
           children: [
+            if (!widget.isEditing) ...[
+              _validityNotice(),
+              const SizedBox(height: AppSpacing.gap),
+            ],
             _imageCard(),
             const SizedBox(height: AppSpacing.gap),
             _infoCard(),
@@ -316,9 +320,51 @@ class _PublishPageState extends ConsumerState<PublishPage> {
     });
   }
 
+  /// 有效期提示：这条规则卖家最该先知道，所以放在表单最前面（与网页端一致）
+  Widget _validityNotice() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        border: Border.all(color: const Color(0xFFFDE3C8)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.schedule, size: 16, color: AppColors.price),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  '每件商品可挂 7 天',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF9A3412),
+                  ),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  '到期还没卖出会自动下架（不扣信用分）。在「我的发布」里点一下重新上架就能再挂 7 天，图片和描述都不用重填。',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.6,
+                    color: Color(0xFFB45309),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 图片：4 列方形格子，右上角删除，第一张标封面
-  Widget _imageCard() {
-    return AppCard(
+  Widget _imageCard() {    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

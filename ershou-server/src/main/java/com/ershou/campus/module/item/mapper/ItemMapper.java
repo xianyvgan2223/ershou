@@ -52,4 +52,38 @@ public interface ItemMapper extends BaseMapper<Item> {
     @Update("UPDATE item SET status = 8, audit_result = 2, audit_reason = #{reason}, version = version + 1 "
             + "WHERE id = #{itemId} AND status IN (1, 2, 3, 6)")
     int forceOffline(@Param("itemId") Long itemId, @Param("reason") String reason);
+
+    /**
+     * 卖家二次申请上架（仅限「违规下架(8)」）。
+     *
+     * <p>与 {@link #releaseLock} 不同：这里把商品置为「审核中(1)」而<b>不是直接(2)在售</b>，
+     * 因为在售期间它还不能对外可见——要等审核员在「上架审核」页点通过。
+     * 条件更新兜并发：连点两次只会生效一次。
+     */
+    @Update("UPDATE item SET status = 1, version = version + 1 "
+            + "WHERE id = #{itemId} AND status = 8")
+    int applyRelist(@Param("itemId") Long itemId);
+
+    /** 记录「审核员已看过的那一版内容」快照，用于识别在售期间的改名/改描述 */
+    @Update("UPDATE item SET last_live_title = #{title}, last_live_desc_hash = #{descHash} WHERE id = #{itemId}")
+    int markLiveSnapshot(@Param("itemId") Long itemId, @Param("title") String title,
+                         @Param("descHash") String descHash);
+
+    /**
+     * 上架审核页的「下架」：把商品撤下来，但<b>不</b>记成违规。
+     *
+     * <p>与 {@link #forceOffline} 的区别是处置力度：
+     * <ul>
+     *   <li>这里 → 已下架(5)：内容看着不对但够不上违规，卖家可以改完重新上架；</li>
+     *   <li>forceOffline → 违规下架(8)：明确违规，卖家不能自己解除，要二次申请。</li>
+     * </ul>
+     * 已售出(4) 与已下架(5) 没有可撤的东西，条件更新自然返回 0 行。
+     *
+     * <p>同时清掉机审字段与锁库信息：这个商品已经不在售了，{@code audit_result=1}（当时机审通过）
+     * 留着会让"商品管理"页看起来像是刚审核通过的商品；锁库信息不清则会留下一条永远等不到释放的锁。
+     */
+    @Update("UPDATE item SET status = 5, lock_user_id = NULL, lock_expire_at = NULL, "
+            + "audit_result = NULL, audit_reason = NULL, version = version + 1 "
+            + "WHERE id = #{itemId} AND status IN (1, 2, 3, 6)")
+    int downlist(@Param("itemId") Long itemId);
 }

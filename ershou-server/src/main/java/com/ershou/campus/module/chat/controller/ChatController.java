@@ -2,8 +2,10 @@ package com.ershou.campus.module.chat.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.ershou.campus.common.result.Result;
+import com.ershou.campus.module.chat.dto.BatchDeleteSessionsDTO;
 import com.ershou.campus.module.chat.dto.OpenSessionDTO;
 import com.ershou.campus.module.chat.dto.SendMessageDTO;
+import com.ershou.campus.module.admin.vo.BatchAuditResultVO;
 import com.ershou.campus.module.chat.service.ChatService;
 import com.ershou.campus.module.chat.vo.ChatMessageVO;
 import com.ershou.campus.module.chat.vo.ChatSessionVO;
@@ -31,8 +33,9 @@ public class ChatController {
 
     @Operation(summary = "我的会话列表（含未读数、对方在线状态、商品卡片）")
     @GetMapping("/sessions")
-    public Result<List<ChatSessionVO>> sessions() {
-        return Result.ok(chatService.listSessions(StpUtil.getLoginIdAsLong()));
+    public Result<List<ChatSessionVO>> sessions(
+            @RequestParam(defaultValue = "false") boolean includeDeleted) {
+        return Result.ok(chatService.listSessions(StpUtil.getLoginIdAsLong(), includeDeleted));
     }
 
     @Operation(summary = "从商品发起会话（已存在则复用）")
@@ -45,6 +48,19 @@ public class ChatController {
     @GetMapping("/sessions/{id}")
     public Result<ChatSessionVO> detail(@PathVariable Long id) {
         return Result.ok(chatService.sessionDetail(StpUtil.getLoginIdAsLong(), id));
+    }
+
+    @Operation(summary = "删除聊天记录（只删自己这一侧，对方不受影响；对方再发消息会自动恢复）")
+    @DeleteMapping("/sessions/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        chatService.deleteSession(StpUtil.getLoginIdAsLong(), id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "批量删除聊天记录（多选删除，逐条独立处理，返回失败明细）")
+    @PostMapping("/sessions/batch-delete")
+    public Result<BatchAuditResultVO> batchDelete(@Valid @RequestBody BatchDeleteSessionsDTO dto) {
+        return Result.ok(chatService.batchDelete(StpUtil.getLoginIdAsLong(), dto.getIds()));
     }
 
     @Operation(summary = "历史消息（id 游标：beforeId 往前翻，afterId 断线补拉，两者互斥）")

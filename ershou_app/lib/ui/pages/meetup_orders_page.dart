@@ -201,6 +201,27 @@ class _MeetupOrdersPageState extends ConsumerState<MeetupOrdersPage> {
                 style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
               ),
             ],
+            // 终态单（已取消 4 / 已失效 5）把原因摊开说清楚。
+            // 商品被卖给别人、被下架导致自动作废时，以前这里只有一个「已失效」。
+            if (o.status == 4 || o.status == 5) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3F2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  o.cancelReason.isEmpty ? '本次约面交已结束' : o.cancelReason,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: Color(0xFFB42318),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             _actions(o, isBuyer),
           ],

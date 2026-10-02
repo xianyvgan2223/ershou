@@ -261,7 +261,10 @@ watch(
 .header {
   position: sticky;
   top: 0;
-  z-index: 100;
+  // 必须高于页面内所有浮动控件（地图气泡旁的「定位我的位置 / 看全部点位」是 550，
+  // Leaflet 平面图的控件是 400~500）。否则页面一滚动，那些按钮会盖到顶栏和导航上面。
+  // 仍低于 Element Plus 的弹层（popper / dialog / message 都是 2000+）。
+  z-index: 1000;
   border-bottom: 1px solid var(--line);
   background: rgb(255 255 255 / 88%);
   backdrop-filter: saturate(180%) blur(12px);

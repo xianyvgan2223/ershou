@@ -104,6 +104,29 @@ export function fetchChatUnread(): Promise<ChatUnread> {
   return http.get<ChatUnread>('/chat/unread')
 }
 
+/**
+ * 删除聊天记录（只删自己这一侧）：
+ * 会话从我的列表消失、未读清零，对方不受影响；
+ * 对方再发消息时服务端会自动恢复该会话（与微信一致）。
+ */
+export function deleteChatSession(sessionId: number): Promise<null> {
+  return http.delete<null>(`/chat/sessions/${sessionId}`)
+}
+
+/**
+ * 批量删除聊天记录（多选删除）。
+ *
+ * 服务端逐条独立处理：**有一条不是我的会话也不会整批失败**，
+ * 所以返回值里带失败明细，调用方要如实告诉用户哪几条没删掉。
+ */
+export function batchDeleteChatSessions(ids: number[]): Promise<{
+  success: number
+  failed: number
+  failures: { id: number; reason: string }[]
+}> {
+  return http.post('/chat/sessions/batch-delete', { ids })
+}
+
 export function fetchQuickReplies(): Promise<string[]> {
   return http.get<string[]>('/chat/quick-replies')
 }

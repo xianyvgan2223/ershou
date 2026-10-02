@@ -33,9 +33,22 @@ mybatis-plus:
 sa-token:
   token-name: Authorization
   token-prefix: Bearer
-  timeout: 604800
+  # 会话有效期：10 年（≈"登录一次之后一直保持"，除非用户自己点退出登录）。
+  #
+  # 原来是 604800 秒 = 7 天，这是**真实会掉登录**的一个坑：
+  # 学生放假 7 天以上没打开 App，回来就得重新登录，而这并不是用户"自己退出"。
+  # 一个校园二手平台没有理由让会话过期 —— 真要作废凭证，有"退出登录"和服务端
+  # 删会话（Redis 里 Authorization:login:token:* ）两条路，不需要靠时间。
+  #
+  # 为什么不用 -1：Sa-Token 把 -1 当"永不过期"，但 Redis 这种带 TTL 的存储
+  # 对永久 key 的处理各版本不一致，给个明确的 10 年更可控（315360000 秒）。
+  timeout: 315360000
+  # 不因"长期不活跃"而失效（-1 = 关闭活跃超时）。否则前面那个 10 年形同虚设：
+  # 只要闲置超过这个阈值，token 一样会被判失效。
   active-timeout: -1
+  # 允许多端同时在线（手机 + 电脑互不影响）
   is-concurrent: true
+  # 每次登录发新 token（不共用），方便按设备单独退出
   is-share: false
   token-style: uuid
   is-log: false
@@ -89,6 +102,16 @@ ershou:
     role-flag: 8
     # 额外的运营用户 id 白名单（逗号分隔，本地开发/应急用）
     user-ids: ${ERSHOU_ADMIN_USER_IDS:}
+  review:
+    # 上架审核（运营后台「上架审核」页）
+    # 实时推送：新上架 / 改名 / 被处置秒级推到所有审核员页面（ws://host/ws/admin/review）
+    realtime-enabled: true
+    online-ttl: 90s
+    max-batch-size: 50
+    # 违规下架的商品是否需要卖家二次申请 + 运营审核才能回到在售
+    violation-relist-enabled: true
+    # 处置完的记录在列表里保留多久（审核员能回看"我刚点了什么"）
+    done-keep-window: 24h
   storage:
     mode: minio
     endpoint: http://127.0.0.1:9010

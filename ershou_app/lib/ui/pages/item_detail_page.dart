@@ -7,6 +7,7 @@ import '../../core/network/api_client.dart';
 import '../../core/providers.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/models.dart';
+import '../../data/models2.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/net_image.dart';
@@ -33,6 +34,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
   bool _meetupBusy = false;
   /// 加入购物车进行中
   bool _cartBusy = false;
+  /// 我在这件商品上已有的进行中面交单（1 待确认 / 2 待面交）：有就把按钮灰掉
+  MeetupOrder? _myOrder;
 
   @override
   void initState() {
@@ -67,6 +70,8 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
         _error = null;
       });
       unawaited(ref.read(localStoreProvider).setJsonCache(_cacheKey, raw));
+      // 商品到手后再查"我约过没有"：按钮要能显示成"已约，等卖家确认"并灰掉
+      unawaited(_loadMyOrder());
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -171,13 +176,14 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
     if (_meetupBusy) return;
     setState(() => _meetupBusy = true);
     try {
-      await ref.read(orderRepositoryProvider).create(
-            itemId: item.id,
-            pointId: item.preferPointId,
-          );
+      // 买家提交意向**不决定面交地点与时间**：商品在卖家手上，由他定
+      // （卖家在「我的面交 → 我卖的」里设），想改就在私聊里商量。
+      await ref.read(orderRepositoryProvider).create(itemId: item.id);
       if (!mounted) return;
       setState(() => _meetupBusy = false);
-      showToast(context, '已发起约面交，等卖家确认');
+      showToast(context, '已发起约面交，等卖家确认（面交点与时间由卖家定）');
+      // 立刻刷新按钮状态：刚约过的商品按钮该灰掉，不能让用户再点一次
+      unawaited(_loadMyOrder());
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _meetupBusy = false);
@@ -186,6 +192,26 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
       if (!mounted) return;
       setState(() => _meetupBusy = false);
       showToast(context, '约面交失败：' + e.toString());
+    }
+  }
+
+  /// 「约面交」按钮文案：约过之后要说清现在是什么状态，而不是继续显示"约面交"
+  String _bookText(bool onSale, String closedText) =>
+      bookButtonText(activeOrderStatus: _myOrder?.status, onSale: onSale, closedText: closedText);
+
+  /// 查我在这件商品上有没有进行中的面交单（有就把按钮灰掉）
+  Future<void> _loadMyOrder() async {
+    final item = _item;
+    if (item == null || !_loggedIn) {
+      if (mounted) setState(() => _myOrder = null);
+      return;
+    }
+    try {
+      final order = await ref.read(orderRepositoryProvider).activeOrderOfItem(item.id);
+      if (!mounted) return;
+      setState(() => _myOrder = order);
+    } catch (_) {
+      // 查不到就当没有：不要因为一次探测失败就把「约面交」也禁掉
     }
   }
 
@@ -639,11 +665,12 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
           const SizedBox(width: 8),
           Expanded(
             child: FilledButton(
-              onPressed: onSale && !_meetupBusy ? _createMeetup : null,
+              // 已经约过就灰掉（后端也做了防重，这里只是别让用户白点）
+              onPressed: onSale && !_meetupBusy && _myOrder == null ? _createMeetup : null,
               style: FilledButton.styleFrom(
-                backgroundColor: onSale ? AppColors.brand : AppColors.inkFaint,
+                backgroundColor: onSale && _myOrder == null ? AppColors.brand : AppColors.inkFaint,
               ),
-              child: Text(onSale ? '约面交' : closedText),
+              child: Text(_bookText(onSale, closedText)),
             ),
           ),
         ],
@@ -698,3 +725,37 @@ class _CircleBackButton extends StatelessWidget {
     );
   }
 }
+
+/// 「约面交」按钮的状态判定。
+///
+/// 抽成**纯函数**是为了能直接覆盖测试：以前这段逻辑埋在 State 里
+/// （依赖 `_myOrder` 与 widget 构建），"约过之后按钮该不该灰"只能靠手点验证。
+///
+/// - `activeOrderStatus`：我在这件商品上进行中的面交单状态（1 待确认 / 2 待面交），没有就传 null
+/// - 返回 (是否禁用, 按钮文案)
+({bool disabled, String text}) bookButtonState({
+  required int? activeOrderStatus,
+  required bool onSale,
+  required String closedText,
+}) {
+  if (activeOrderStatus != null) {
+    // 已经约过：按钮灰掉，文案说清现在等谁
+    return (
+      disabled: true,
+      text: activeOrderStatus == 2 ? '已约好，待面交' : '已约，等卖家确认',
+    );
+  }
+  return (disabled: !onSale, text: onSale ? '约面交' : closedText);
+}
+
+/// 只要文案（按钮渲染用）
+String bookButtonText({
+  required int? activeOrderStatus,
+  required bool onSale,
+  required String closedText,
+}) =>
+    bookButtonState(
+      activeOrderStatus: activeOrderStatus,
+      onSale: onSale,
+      closedText: closedText,
+    ).text;

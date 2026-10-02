@@ -9,9 +9,9 @@
 | 开发文档 | `开发文档.md` | 架构、数据库、Redis、**Elasticsearch 搜索**、接口、部署、排期 |
 | 开发日志 | `开发日志.md` | 每轮迭代的产出 / 决策 / 踩坑 / 实测验证（倒序，最新在最上面） |
 | 环境清单 | `环境检查与安装清单.md` | 本机环境实测结果与安装步骤 |
-| 后端 | `ershou-server/` | Spring Boot 3.3.5 + MyBatis-Plus 3.5.9 + Sa-Token + MinIO + Elasticsearch 8 |
+| 后端 | `ershou-server/` | Spring Boot 3.3.5 + MyBatis-Plus 3.5.9 + Sa-Token + MinIO + Elasticsearch 8 + WebSocket |
 | 前端 | `ershou-web/` | Vue 3.5 + Vite 6 + TypeScript + Element Plus + Leaflet |
-| 数据库 | `sql/schema.sql` | MySQL 8，19 张表 + 种子数据 |
+| 数据库 | `sql/schema.sql` | MySQL 8，20 张表 + 种子数据 |
 | 依赖编排 | `docker-compose.yml` | Redis（6380）+ MinIO（9010/9011）+ Elasticsearch（9210），手动启动 |
 
 ---
@@ -38,12 +38,41 @@
 | `LanDiscoveryResponder` | 后端 UDP **48899** 应答，手机「一键扫描」靠它秒连（**需重启后端生效**） |
 
 ```powershell
-# 手机端连不上时的排查顺序（校园网 IP 会变、可能开 AP 隔离）
+# 手机端连不上时的排查顺序（校园网 IP 会变、可能开 APK 隔离）
 powershell -ExecutionPolicy Bypass -File .\scripts\lan-info.ps1
 ```
 
 App 里提供三条连接路径：**一键扫描**（UDP 广播 → 网段扫描）、**手动输入 IP:8080**、**扫二维码**；
 冷启动会先探测上次用过的地址，能用就直接进登录页。
+
+### 登录态：一次登录长期有效（不用反复登录）
+
+**设计目标是"登录一次之后一直保持，除非用户自己点退出登录"。** 三段链路都要成立：
+
+| 环节 | 实现 | 怎么自查 |
+| --- | --- | --- |
+| 客户端保存 | token 落 SharedPreferences（`ershou.token`） | `adb shell "run-as com.ershou.ershou_app cat /data/data/com.ershou.ershou_app/shared_prefs/FlutterSharedPreferences.xml"` |
+| 冷启动恢复 | `AuthNotifier.build` 从本地读回 token；`apiClientProvider` 建 client 时装上它 | 冷启动应直接进首页，**不出现登录页** |
+| 服务端会话不丢 | Sa-Token 会话存 **Redis**（`Authorization:login:token:*`），后端重启不会清空 | 重启后端后同一个 token 仍能调 `/users/me` |
+
+**会话有效期 = 10 年**（`application.yml` 的 `sa-token.timeout: 315360000`，`active-timeout: -1`）：
+
+- 原来是 7 天 —— 这是**真实会掉登录**的坑：学生放假超过 7 天没打开 App，回来就得重新登录，
+  而这并不是"用户自己退出"；
+- 校园二手没有理由让会话过期。真要作废凭证有两条路：用户点**退出登录**，
+  或服务端删掉 Redis 里的会话 key；
+- `active-timeout: -1` 也必须一起设：否则"闲置超过阈值"一样会判失效，前面那个 10 年形同虚设。
+
+> ⚠️ **开发期最容易被误判成"登录坏了"的两件事**：
+> 1. `flutter install` 会**先卸载再安装**（日志里写着 `Uninstalling old version...`），
+>    Android 卸载会清空 App 数据 —— 登录态没了。**这不是 bug，是重装**。
+>    反复装 App 的迭代期，每次都要重新登录一次；
+> 2. 换局域网 IP 后，App 里存的地址变了要重连一次；token 与地址无关（跟着账号），
+>    所以重连不会要求重新登录。
+
+> ⚠️ **改 `sa-token.timeout` 不会给已有会话续期**：Sa-Token 的 TTL 在**签发时**就写进 Redis 了，
+> 改配置只影响之后新登录的 token。所以想让某台设备吃到新的有效期，**退出登录再登一次**。
+> 自查当前有效期：`docker exec ershou-redis redis-cli -a <密码> --no-auth-warning TTL Authorization:login:token:<token>`
 
 ## 二、启动步骤
 
@@ -61,7 +90,27 @@ App 里提供三条连接路径：**一键扫描**（UDP 广播 → 网段扫描
 .\scripts\smoke-test.ps1
 ```
 
+**一键启动前后端**（依赖自检 + 前后端各开一个窗口 + 等到就绪），等价于上面 1~3 步：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-all.ps1
+# 可选：-TimeoutSec 300（后端首次拉依赖慢）/ -BackendOnly / -FrontendOnly / -NoWait / -SkipDeps
+```
+
+> 端口已在监听时不会重复启动（幂等），可直接重复执行。前端务必用 **localhost** 访问，
+> `127.0.0.1:5173` 连不上（vite 只绑了 IPv6 回环）。
+
 其他脚本：`dev-down.ps1`（停依赖）、`check-env.ps1`（环境自检）。
+
+> ⚠️ **`smoke-test.ps1` 是"直接删库"式测试**：它每次运行都会清空
+> `item / meetup_order / cart_item / favorite / credit_log` 五张表（不管是谁的数据），
+> 只保留 `sys_user` 与 `trade_point`。
+> 现在它会先列出受影响行数并要求输入 `yes` 确认；无人值守/CI 用 `-Force` 跳过。
+> **要保留库里的数据时先备份**：
+> ```powershell
+> mysqldump -h 127.0.0.1 -u root -p ershou > .build\backup-$(Get-Date -f yyyyMMdd-HHmm).sql
+> ```
+> 想重新灌演示数据：`powershell -File .build\seed-demo.ps1`（9 件商品 / 3 个卖家）。
 
 > ES 镜像默认由 `docker/es/Dockerfile` 构建，已内置 **IK 中文分词**（装不上会自动退官方 smartcn，再不行用内置 ngram —— 后端启动时探测实际可用的分词器再建索引）。
 > 想用纯官方镜像：删掉 `docker-compose.yml` 里 elasticsearch 的 `build` 段、把 image 改回 `elasticsearch:8.13.4`，然后删除旧索引重启后端即可。
@@ -98,16 +147,35 @@ Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后
 | --- | --- |
 | 认证 | 手机号 + 验证码登录（轻注册，**无实名/学籍字段**）；手机号 AES 加密存储 + SHA256 索引；新号 7 天内限额；**个人资料编辑**（`PATCH /users/me`：昵称/头像/学校校区/小铺名与小铺简介，昵称与小铺名过内容审核，头像只收上传接口产出的地址） |
 | 商品 | 发布（含 AI 机审）/ 详情 / 列表 / 搜索筛选排序 / 下架 / 我的发布 |
-| **搜索** | Elasticsearch 8 索引 `ershou_item`：中文分词（IK→smartcn→ngram 自动探测）、`title^3` 相关性排序、`<em>` 高亮；ES 挂掉或深分页自动降级 MySQL LIKE；索引随写路径实时同步 + 2 分钟增量兜底 + 管理员全量重建 |
+| **搜索** | Elasticsearch 8 索引 `ershou_item`：中文分词（IK→smartcn→ngram 自动探测）、`title^3` 相关性排序、`<em>` 高亮；ES 挂掉或深分页自动降级 MySQL LIKE；索引随写路径实时同步 + 2 分钟增量兜底 + 管理员全量重建（**清空重建**，会删掉索引里多余的幽灵文档） |
+
+**列表一次加载多少条**（2026-10-02 实测）
+| 端 | 机制 | 一次几条 | 备注 |
+| --- | --- | --- | --- |
+| 网页端首页 | **分页**（页码 + 跳页），不是懒加载 | **16 条** | 55 件 → 4 页（16/16/16/7） |
+| 移动端首页 | **上拉加载更多**（距底部 420px 自动触发 `loadMore`） | **20 条** | 55 件 → 上拉 3 次（20/20/15） |
+| 后端上限 | `Math.min(pageSize, 100)` | 传 1000 也只给 100 | 见 `ItemService` |
+
+图片是懒加载的：网页端 `el-image lazy`，移动端 `CachedNetworkImage` + 按显示尺寸解码
+（列表缩略图不会把 3000px 原图整张读进内存）；移动端列表本身由 `CustomScrollView` 按需构建。
+
+> ⚠️ **ES 索引会脏，而且 `reindexAll()` 不会帮你清理**（踩过）：
+> 它是 **upsert 语义**，只覆盖不删除 —— 直接用 SQL 物理删商品（测试脚本这么干过很多次）
+> 时写路径走不到，索引里的文档就永久留下来了。实测积累到 `ES 311 条 vs MySQL 在售 10 条`，
+> 后果是**搜索结果 `total` 虚高**：搜「自行车」显示"共 12 件"但一条都列不出来
+> （total 来自 ES、records 回库后被 `status != 2` 筛掉）。
+> 处置：**删索引再重启后端**（`reindexOnStartup=true` 会按当前库重建），
+> 或调 `POST /api/v1/search/reindex`（注意：它同样只做 upsert，清不掉幽灵文档）。
+> 正常通过接口下架/售出的商品不受影响 —— 那条路径会 `syncById` 覆盖成新状态。
 | **AI 审核** | 禁售词直接拦截（`50001`）、可疑词转人工（状态"审核中"）；接口抽象，可换 Ollama 或云审核 |
 | **校内地图** | 底图配置 + 点位（双坐标）+ 每个点位在售数/最低价 + 面交点推荐 + 用户自定义点位提交 |
 | 收藏 | 收藏/取消（唯一索引兜底并发重复） |
 | 购物车 | 按卖家分组、增删改、**合并面交结算**（同卖家合并、共享行程号 batchNo） |
 | 面交单 | **约面交 = 意向单**（提交不锁库；面交点/时间窗都可留空 = 待协商，提交后自动私聊提醒卖家）→ 卖家接受（这时才条件更新锁库，锁到时间窗结束 +2h）→ 见面验货 → 卖家点「已卖出」成交（商品售出 + 双方信用分 +2）；核销码已删除 |
-| **私聊 IM** | WebSocket `/ws/chat`（Sa-Token 握手鉴权）+ REST 兜底：从商品发起会话（唯一索引复用）、文本/图片消息、未读数与已读回执、快捷话术、对方在线状态；**买卖角色区分**（会话列表显示"我买/我卖"，气泡左侧对方头像+「昵称（卖家）」，顶部标明"我是买家/卖家"）；**消息撤回**（仅发送方、限时 2 分钟、双向实时消失、会话预览同步改「已撤回」）；**拉黑**（单向存储双向生效：任一方拉黑则双方都发不出，会话与主页都有状态提示）；**用户主页**（`/user/{id}`：信用/学校/在售，可私聊可拉黑，公开接口不含任何联系方式）；**聊天风控**：高危词拦截并留痕（独立事务，证据不随发送失败回滚）、可疑词弱提醒不篡改原文、新号每日私聊限额；正文 AES-GCM 加密落库；跨实例 Redis Pub/Sub 广播 |
+| **私聊 IM** | WebSocket `/ws/chat`（Sa-Token 握手鉴权）+ REST 兜底：从商品发起会话（唯一索引复用）、文本/图片消息、未读数与已读回执、快捷话术、对方在线状态；**买卖角色区分**（会话列表显示"我买/我卖"，气泡左侧对方头像+「昵称（卖家）」，顶部标明"我是买家/卖家"）；**消息撤回**（仅发送方、限时 2 分钟、双向实时消失、会话预览同步改「已撤回」）；**删除聊天记录**（每用户软删除：只从我的列表移除、未读一起归零，对方不受影响，对方再发消息自动恢复；支持**多选批量删除**）；**拉黑**（单向存储双向生效：任一方拉黑则双方都发不出，会话与主页都有状态提示）；**用户主页**（`/user/{id}`：信用/学校/在售，可私聊可拉黑，公开接口不含任何联系方式）；**聊天风控**：高危词拦截并留痕（独立事务，证据不随发送失败回滚）、可疑词弱提醒不篡改原文、新号每日私聊限额；正文 AES-GCM 加密落库；跨实例 Redis Pub/Sub 广播 |
 | 文件 | MinIO 上传（校验 → 压缩长边 1280 → 存桶），MinIO 不可用时可切 `local` 降级 |
-| 定时任务 | 释放超时锁库、面交单 2 小时超时失效、商品 60 天过期、**浏览量每 10 分钟批量回写** |
-| **运营后台** | 审核工作台（商品 / 点位 通过·驳回·批量）、模板化驳回原因、商品全状态检索与**强制下架**、用户封禁/解封/限权、信用分人工调整（写 credit_log 流水）、操作审计（sys_audit_log，含变更前后与 IP）；管理员判定统一走 role_flags & 8 或白名单 |
+| 定时任务 | 释放超时锁库、面交单 2 小时超时失效、商品 **7 天**到期自动下架（并作废该商品上的挂单）、**浏览量每 10 分钟批量回写** |
+| **运营后台** | 审核工作台（商品 / 点位 通过·驳回·批量）、**上架审核**（实时确认每条上架都被看过）、模板化驳回原因、商品全状态检索与**强制下架**、用户封禁/解封/限权、信用分人工调整（写 credit_log 流水）、操作审计（sys_audit_log，含变更前后与 IP）；管理员判定统一走 role_flags & 8 或白名单 |
 | **Redis 读缓存** | 商品详情（10 分钟 + 空值缓存防穿透）、地图点位含在售数/最低价（30 分钟，版本号 O(1) 整体失效）、分类/学校/校区/点位字典（1 小时，MGET 消 N+1）、运营概览 8 个 count（30 秒）；浏览量走 Redis 计数 + 每 10 分钟批量回写；失效统一在 `TxHooks.afterCommit` 执行；`ershou.cache.enabled=false` 一键回滚 |
 | 通用 | 统一响应体 + 错误码分段 + 全局异常 + traceId 链路 + 分页 + Swagger |
 
@@ -209,7 +277,7 @@ AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品
     $env:MYSQL_PWD = $env:MYSQL_PASSWORD
     mysql -h 127.0.0.1 -u ershou ershou -e "update sys_user set role_flags = role_flags | 8 where id = 3;"
 
-前端顶栏下拉与"我的"页会在 isAdmin=true 时出现**运营后台**入口；接口前缀 /api/v1/admin（16 个接口）。
+前端顶栏下拉与"我的"页会在 isAdmin=true 时出现**运营后台**入口；接口前缀 /api/v1/admin。
 
 | 能力 | 关键接口 |
 | --- | --- |
@@ -218,6 +286,7 @@ AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品
 | 审核通过 / 驳回 / 批量 | POST /admin/audit/items/{id}/approve · /{id}/reject · /batch |
 | 驳回原因模板 | GET /admin/audit/reject-reasons?scope=item 或 point |
 | 点位审核 | GET /admin/audit/points · POST /admin/audit/points/{id}/approve 或 reject |
+| **上架审核队列** | GET /admin/review/feed · /stats · POST /admin/review/items/{id}/reviewed 或 offline · /batch/{action} |
 | 商品管理 / 强制下架 | GET /admin/items · POST /admin/items/{id}/offline |
 | 用户管理 / 信用分 | GET /admin/users · POST /admin/users/{id}/status 或 credit |
 | 面交单查询 | GET /admin/orders |
@@ -226,9 +295,188 @@ AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品
 **端到端自测**：scripts/admin-smoke-test.ps1（默认打 8080，可加 -Base http://127.0.0.1:8081/api/v1 指向其他实例；44 项断言，可重复执行）。
 **私聊自测**：scripts/chat-smoke-test.ps1（同样支持 -Base，会先清空 chat 表与私聊 Redis key，可重复执行；依赖本机 node，脚本用 node 内置 fetch/WebSocket）。
 **资料编辑自测**：scripts/profile-smoke-test.ps1（同样支持 -Base，用测试号 13800000003，跑完会把资料还原成默认值，可重复执行）。
+**网页端后台验收**：scripts/verify-admin-console.mjs（**65 项断言**，真 Chrome；自己造数据、跑完自己清理，可重复执行）。
+**上架审核页验收**：scripts/verify-admin-review.mjs（**30 项断言**，真 Chrome）。
+**个人中心验收**：scripts/verify-profile-page.mjs（**20 项断言**，真 Chrome；**同时覆盖空数据与有数据两种状态**）。
+**黑名单验收**：scripts/verify-blocklist.mjs（**23 项断言**，真 Chrome；含空状态、双向拉黑标记、真实解除，跑完自动清理）。
+
+### 黑名单（/blocked）
+
+拉黑/解除的**动作**入口在聊天窗与用户主页，**查看与解除**统一在 `/blocked`
+（个人中心「我的黑名单」、聊天页头部「黑名单」都能进）。
+
+- `GET /users/blocks` 返回 `UserBlockVO`：带昵称/头像/信用/校区/拉黑时间，
+  **不含手机号等联系方式**（黑名单页没有理由比公开主页看到更多）。
+- ⚠️ **解除是单向的**：双向拉黑时解除只解除自己这一侧，对方仍拉黑着你，**解除后依然无法私聊**。
+  列表用「对方也在拉黑你」标记 + 二次确认文案（随是否双向变化）把这件事讲明白，
+  否则用户会以为"解除了还不能聊 = 解除没生效"。
+- 后端做这个 VO 时注入的是 `SysUserMapper` 而不是 `UserService`，避免循环依赖；
+  学校/校区名走 `DictionaryCache`，与公开主页同一口径。
+
+> **移动端还没有黑名单页**，而且 `api_repository2.dart` 里连拉黑/解除的 API 封装都没有
+> （聊天页只能读 `blockedByMe` 显示一行状态）。这是已知缺口。
+
+### 个人中心（/profile）的信息层级
+
+这个页面只回答两个问题，改版时请守住这个分工，别再往里堆入口：
+
+1. **有没有要我动手的事** → 顶部待办区（等你确认的面交 / 等你确认收货 / 购物车待结算）。
+   一件都没有时**要明确说"暂无待处理"**，不要留空。
+2. **我最近的东西怎么样了** → 概览数字 + 「我发布的」「我收藏的」两个列表（带图/价/状态/时间），空时给引导按钮。
+
+档案类信息（用户编号、每日配额、刷新/编辑/退出）一律放**底部一行小字** —— 要的时候找得到，不要时不占地方。
+
+> 两个已知的口径妥协（写在这里免得被当成 bug）：
+> - 「在售中 / 已卖出」是**前端按状态统计**的，因为 `/items/mine` 不支持 `status` 过滤，
+>   只取了最近 100 件来数 —— 商品超过 100 件时这两个数字会偏小。
+> - `creditLevel` 后端返回的是数字，页面上会映射成中文（裸数字没人看得懂）。
+>
+> 信用区**只显示分数 + 中文等级，不显示星级**：星级是「分数 ÷ 20 四舍五入」，
+> 与分数是同一个信息说两遍，而且只在整 20 分时才准（80 分和 89 分都是 4 星）。
+> 验收脚本有一条断言专门防止它被加回来。
+
+### 管理台视觉规范（2026-10-02 整改"太花了"）
+
+规则集中写在 `ershou-web/src/styles/admin.scss`，**一处定义、全站共用**（`main.ts` 引入）。
+改样式时请遵守，别再往页面里塞颜色：
+
+1. **颜色要有分工**：
+   绿 = 品牌 / 主操作；红 = 破坏性操作（下架 / 删除 / 封禁）；橙 = 需要注意；
+   **其余（状态、时间、次要信息）一律中性灰**。
+   > 这是整改的主因：`--el-color-success` 与 `--el-color-primary` 是**同一个绿色**，
+   > 于是"主要"和"成功"在视觉上分不开，一屏几十个绿 tag = 花。
+2. **只保留一层阴影**，不要装饰性色块：统计卡左侧的彩色竖条、面板标题的绿竖条、
+   侧栏底部的彩色大数字区都已去掉（那些颜色不承载信息 —— 数字本身已经说明一切）。
+3. **表格是主角**：统一行高/字号；不用斑马纹；操作列一律 `link` 文字按钮；
+   行内标注用中性 `.admin-review__label`，只有真危险/需注意才上色（`.is-danger` / `.is-warn`）。
+4. **说明文字收进「帮助」胶囊**（`.admin-help`，默认收起）：要看看，不要时不抢注意力。
+5. **同一件事只说一遍**：待办数字只在"该动手的地方"出现一次。
+6. **侧栏不用品牌色**：当前项用「灰底 + 左侧深色竖条 + 深色文字」表示，默认项中性灰。
+   侧栏是工具导航，一列绿底绿字会非常吵。
+
+页面骨架：根元素加 `admin-page`，统计卡用 `.admin-stats > .admin-stat`（`is-primary` 标记"要我动手"的那个），
+表格加 `admin-table`，工具条用 `.admin-toolbar`。
+
+### 操作气泡：一律用 `showTip`，不要用裸 `ElMessage`
+
+```ts
+import { showTip } from '@/utils/feedback'
+showTip('已审核：xxx', 'success')     // 一定会自己消失
+showLongTip('有违规商品申请重新上架…', 'warning')  // 需要更长阅读时间的
+```
+
+> **为什么**：`ElMessage` 的默认行为是"鼠标停在气泡上就清掉倒计时"（源码
+> `message2.mjs` L102 `onMouseenter: clearTimer`），移开才重新计时 —— 运营点完按钮手正停在
+> 那儿，气泡就"有时候不消失"。`showTip` 用 `duration: 0` + 自己定时强制关闭，不受 hover 影响。
+> 离开管理台时 `AdminShell` 会调 `closeAllTips()`，避免提示跟着用户飘到别的页面。
+
+> ⚠️ 改 `.ps1` 脚本要留意两点：**必须带 UTF-8 BOM**（PS 5.1 否则按 GBK 读，中文全乱；
+> `edit` 工具会丢掉 BOM，改完要回头确认），以及**别把 `<el-table-column` 当成 `<el-table`**
+> 批量替换（前缀相同的标签要加边界 `(?![-\w])`，否则构建直接失败）。
+
+### 测试脚本的三条硬约定（踩过很多次）
+
+1. **必须自己造数据**，不要假设库里现成有（清过一次数据就全挂）。
+2. **必须自己清理**，包括用管理员账号发的那几件（只按 `seller_id` 清会漏）。
+3. **清理后必须触发一次索引重建**：清理走的是直接 SQL DELETE，ES 收不到通知，
+   不重建就会攒下幽灵文档 → 搜索结果 `total` 虚高（"共 N 件"却列不出东西）。
+   调 `POST /api/v1/search/reindex?sync=true`（**清空重建**，能真正清掉幽灵文档；
+   `sync=true` 会等到重建完成且索引已 refresh 才返回，跑完可以立刻断言一致性）。
+   > 为什么必须同步：默认是异步的（返回"已在后台开始"），这时索引还在删+重建中途；
+   > 而且 ES bulk 写入默认约 1 秒后才可见 —— "接口返回了"不等于"结果已可见"。
+
+另外两个反复踩的坑：
+- **每日发布计数**（`ershou:limit:post:<uid>:<date>`）会被反复跑的脚本用光，
+  只调大 `sys_user.publish_limit` 没用，必须清计数键 —— 症状是发布返回 `20003`、
+  所有断言都拿到空值，看着像功能坏了。
+- **前置文件**：脚本依赖 `.build/test-item.png` / `.build/test-upload.jpg`，
+  缺失时上传会拿到空 URL，同样表现为"功能坏了"。
+
+## 五·五、上架审核（实时确认"每条商品都被看过"）
+
+运营后台第二项「上架审核」，解决的是**AI 机审覆盖不到的那一段**：机审只拦"明确禁售词"，
+可疑词转人工，但一件用正常词汇写出来的违规商品（比如"管制刀具"换个说法）机审看不出来，
+也没有任何机制保证它被人看过。这一页就是那个"保证"。
+
+**产品口径（2026-10-02 定，四条）**
+
+| # | 规则 | 实现 |
+| --- | --- | --- |
+| ① | 商品正常上架**不拦截**：发布成功即在售，和以前完全一样 | 入队只是"登记"，`ItemReviewService` 从不改商品状态 |
+| ② | 但每条上架都要进这一页，点「已审核」后消失（归档留痕） | `item_review` 一个商品一条记录，条件更新兜并发 |
+| ③ | 在售期间**改名 / 改描述**要重新回到这一页 | `item.last_live_title` / `last_live_desc_hash` 两个快照列对不上即视为内容变了 |
+| ④ | **违规下架(8) 的商品二次申请上架必须审核** | `POST /items/{id}/apply-relist` → 停在「审核中(1)」→ 审核工作台通过才回到在售 |
+
+**两条队列各管一段（别混）**
+
+| 页面 | 管什么 | 商品状态 |
+| --- | --- | --- |
+| 上架审核 | **已经挂在平台上**的商品，事后逐条确认 | 在售(2) / 已锁定(3) |
+| 审核工作台 | **还没上架**的：AI 可疑转人工、违规二次申请 | 审核中(1) |
+
+所以"审核中"的商品**不会**出现在上架审核页里（那是工作台的活），
+而上架审核页里的每条都 `actionable=true` —— 不会出现"列表里有、点了报错"。
+
+**实时推送**（`ws://host/ws/admin/review?token=xxx`，握手额外校验运营身份）
+
+| 事件 | 触发 | 前端行为 |
+| --- | --- | --- |
+| `queued` | 新上架 / 改名重新入队 | 拉到该条 VO 插到列表顶部并闪一下，待审数字用推送里的权威值 |
+| `handled` | 某条被（可能是别人）处置 | 本地摘掉那一行，并把下一批补上来 |
+| `violation-applied` | 卖家提交违规商品二次上架申请 | 弹提示引导去「审核工作台」 |
+
+> 推的是"条数 + 单条"而不是整个列表：一个页面几十上百条，每次上架都重推全量
+> 既浪费、又会让正在看详情的审核员丢失展开态。跨实例靠 Redis Pub/Sub 广播，
+> 与私聊同一套机制（ADR-06），差别是**接收方是"所有审核员"**而不是某一个用户 ——
+> 否则两个审核员看到的队列不一样，"保证每条都被看过"就无从谈起。
+
+**几个踩过的坑**
+
+- **入队失败绝不能影响发布**：登记只是副作用，发布才是用户在做的事。
+  `onItemLiveOptimistic` / `onContentMaybeChanged` 全部 try-catch 吞异常，
+  否则会出现最坏结果 —— 内容没发出去、审核页也没有；
+- **改名要显示"从什么改成了什么"**：`item_review.title` 存的是**改之前**的旧标题
+  （必须赶在快照列被覆盖前取），列表标题则一律用商品**当前**标题。
+  一开始把新标题抄进快照，页面上"原名称"和标题一模一样，等于没有对比信息；
+- **只改价格不该重新入队**：审核员确认的是"这条内容挂出来合不合适"，与价格无关。
+  判据用 `textChanged`（标题或描述变了）而不是"有更新"；
+- **一条记录而不是一条流水**：`uk_item` 唯一键 + `revision` 累加。
+  审核员关心的是"这件商品**现在这一版**看过没有"，历史上被审过几次走 sys_audit_log；
+- **`sellerId=abc` 曾整页 500**：`@RequestParam Long` 遇到非数字抛
+  MethodArgumentTypeMismatch，被全局异常兜成 90001「系统开小差」。
+  运营手输筛选框敲错一个字符是很正常的事，现在解析不了就当"没筛"，列表照常返回；
+- **「下架」不等于「违规」**：审核页的下架置 **已下架(5)**（卖家改完可重新上架），
+  明确违规仍走商品管理的**强制下架(8)**。下架时顺手清掉 `audit_result` 与锁库信息，
+  否则商品列表里会看着像"刚审核通过"的商品；
+- **列表排序与实时插入必须一致**：后端原本按"先到先审"升序，而推送把新条目插在顶部，
+  结果一条商品刚插到最上面、一刷新又跳到底部。现在统一**最新在前**，
+  "老条目会不会被压在下面"由列表里的**等待时长**列（超 6 小时提示、超 1 天标黄）解决；
+- **统计口径必须与列表一致**：`pending` 只算"商品还在售/已锁定"的记录。
+  否则顶部数字恒大于列表条数，审核员第一反应是"这页漏数据了"；
+- **启动补登记**：库里在售却没有审核记录的商品（上线前的存量、或某次入队异常被吞）
+  由 `ItemReviewBackfillRunner` 补登记 —— 这个页面的价值全在**完整性**上，
+  漏一条不会有任何报错，只会让"每条都被看过"变成一句空话。
+
+**存量数据怎么处理**：`sql/migration-item-review.sql` 把已经在售的商品按「已审核」入册
+（review_type=5 存量导入），**不**一次性砸成待审 —— 否则上线瞬间几百条待审，
+审核员分不清哪些是新来的，实时推送也就失去意义。需要重新过一遍存量时：
+`DELETE FROM item_review;` 然后重启后端（启动任务会按待审重新入册）。
+
+**回归**
+
+- `powershell -File scripts/review-smoke-test.ps1`（74 项断言：入队/已审核/改名重入队/下架/
+  违规二次申请/批量/权限/WS 实时/审计留痕/补登记/统计口径，可重复执行）
+- `node scripts/verify-admin-review.mjs`（30 项断言，headless Chrome 走真实页面：
+  侧栏入口与角标、实时连接、**发新商品 285ms 内自动出现**、点已审核后消失、改名标记、
+  详情抽屉、下架闭环、页面无 JS 报错）
+- `node scripts/probe-admin-review-ws.mjs`（WS 探针，也可单独跑，量推送延迟与鉴权）
+
+> 两个测试脚本都会先清掉测试号的「每日验证码次数」计数 —— 后端限的是
+> **每个手机号每天 10 次**，一天跑几轮就撞上 10004，表现像"验证码逻辑坏了"。
+> 注意计数器 key 带日期后缀（`ershou:sms:limit:<phone>:yyyyMMdd`），
+> 直接 `DEL` 不带后缀那个是删不掉的（返回 0，看着成功其实没清）。
 
 ## 六、高德地图接入（校内地图真地图模式）
-
 校内地图是**双模式**的，由后端 `campus.map_type` 决定前端用哪个组件，两者对外 props/events 完全一致，业务代码无感切换：
 
 | map_type | 前端组件 | 说明 |
@@ -239,19 +487,94 @@ AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品
 **1) 配置 Key**（已写入仓库根目录 `.env`，该文件不进 Git）：
 
 ```ini
+# 给【前端 Vite】读：必须带 VITE_ 前缀才会注入浏览器
 VITE_AMAP_JS_KEY=            # 控制台 → 应用管理 → 添加 Key → 服务平台必须选「Web端(JS API)」
 VITE_AMAP_JS_SECURITY_CODE=  # 与 key 同页面显示的「安全密钥」，2021-12-02 后创建的 key 强制要求
+
+# 给【后端 Spring】读：移动端地图是后端下发 HTML，key 从服务端配置取
+AMAP_JS_KEY=                 # 与上面同一个 key，换个变量名
+AMAP_JS_SECURITY_CODE=
 ```
 
-> ⚠️ **两个必须记住的坑**（本项目都踩过）：
-> 1. 变量名**必须带 `VITE_` 前缀**。写成 `AMAP_JS_KEY` 时 vite 不会注入浏览器，
+> ⚠️ **三个必须记住的坑**（本项目都踩过）：
+> 1. **前端那两个变量名必须带 `VITE_` 前缀**。写成 `AMAP_JS_KEY` 时 vite 不会注入浏览器，
 >    `import.meta.env.VITE_AMAP_JS_KEY` 是 `undefined`，前端会静默退回自绘平面图，**不报错**。
 >    自检：`curl http://localhost:5173/@vite/client` 看不到你的变量 = 前缀写错了。
-> 2. **不要用 REST 接口验证 JS API Key**。`restapi.amap.com/v3/security/check` 是给「Web服务」Key
+> 2. **同一个 key 要配两套变量名，只配一套会"坏一半"**（2026-10-02 踩过）：
+>    只配 `VITE_` 那两个 → **网页地图正常、移动端地图打不开**，因为移动端走
+>    `GET /api/v1/map/amap-html`（后端渲染下发 HTML 给 WebView），读的是 `AMAP_JS_KEY`。
+>    后端现在也认 `VITE_` 前缀那两个作为兜底，但正式变量名建议都配上。
+>    自检：`curl http://127.0.0.1:8080/api/v1/map/amap-status` 应返回 `configured: true`。
+> 3. **不要用 REST 接口验证 JS API Key**。`restapi.amap.com/v3/security/check` 是给「Web服务」Key
 >    做数字签名用的，拿 JS API Key 去打只会返回 `USERKEY_PLAT_NOMATCH (10009)` ——
 >    那是"这把 key 不属于我这个平台"的意思，属于**正常反证**，不代表 key 有问题。
 >    JS API Key 唯一可靠的验证方式是在浏览器里真的渲染一张地图出来。
-> 3. 前端通过 vite 的 `envDir` 读根目录 `.env`（见 `ershou-web/vite.config.ts`），改完 `.env` **必须重启 dev server**。
+> 4. 前端通过 vite 的 `envDir` 读根目录 `.env`（见 `ershou-web/vite.config.ts`），改完 `.env` **必须重启 dev server**；
+>    后端同理，改完要**重启后端**（`application-local.yml` 优先级高于环境变量，见第 10.5 节）。
+> 5. **`.env` 由后端自己在启动时自动加载**（2026-10-02 修）：
+>    `DotenvEnvironmentPostProcessor` 会在 Environment 就绪后、任何配置绑定之前读项目根目录的 `.env`，
+>    所以**不管你怎么启动后端（脚本 / IDEA 点 Run / 打 jar）都能拿到 key**，不需要每次手动配。
+>    启动日志里会有 `[dotenv] 已从 …\.env 载入 N 个变量` 这一行作为证据。
+>    > 为什么之前会"每次重启都要配"：`.env` 原本只有 `scripts/dev-server.ps1` 会读，
+>    > 从 **IDEA 直接 Run** 时环境变量是空的 → `ershou.amap.js-key` 解析成空串 →
+>    > 移动端只显示"后端未配置高德 key"。key 一直没丢，是**读取路径依赖了启动方式**。
+>    >
+>    > 仍然为空的唯一可能：`.env` 里确实没配，或后端工作目录不是 `ershou-server`（那样找不到 `../.env`）。
+>    > 另注：`.env` 被设为**最高优先级**（`addFirst`），所以没法再用环境变量临时覆盖单项 —— 请直接改 `.env`。
+
+**1.5) 移动端地图自检**（真实浏览器加载后端下发的 HTML，看瓦片有没有画出来）：
+
+```powershell
+# 前置：后端已启动（不需要前端 dev server）
+node scripts/verify-amap-mobile-page.mjs
+# 16 项断言：key 已配 → HTML 注入正确 → 高德引擎真的渲染（版权行/比例尺/画布非空）→ 点位气泡
+# 截图：.build/amap-mobile/01-mobile-map.png
+```
+
+> 判据为什么不是"瓦片 img 数量"：高德 JS API **2.0 把瓦片画进 canvas**，
+> DOM 里没有瓦片 `<img>` 节点，数 img 永远是 0（误判成"地图没渲染"）。
+> 可靠判据是页面里出现 `© … AutoNavi` 版权行 + 比例尺 + canvas 上有非空像素。
+
+**1.6) 地图页「点位商品小窗」的布局约定**（别再让固定高度算漏）：
+
+```powershell
+flutter test test/map_point_items_window_test.dart   # 7 项，纯 widget 测试，不需要真机
+```
+
+**1.7) 地图选点针：两端必须是同一套画法**
+
+```powershell
+node scripts/verify-pick-pin.mjs   # 11 项，真 Chrome：真的开弹窗、真的点地图、读计算样式
+```
+
+移动端选点页与网页端选点弹窗**用的是同一套后端下发的 HTML**（`GET /api/v1/map/amap-html`），
+所以选点标记也该完全一致 —— 都是 `.pickmark` 那枚水滴针：
+橙色圆头 + 白描边 + 白芯（`::before` 8px）+ 旋转 45° 的尖（`::after` 11px）+ 地面小椭圆 + 投影 + 掉落动画。
+
+> ⚠️ 2026-10-02 踩过：网页端不管什么标记都画成"数字气泡"（`itemCount ?? 0`），
+> 而**正在选取的新点位 itemCount 恒为 0** —— 于是选点标记上是个难看的「0」（用户原话"零图标"）。
+> 现在网页端用 `pickPinId` 把这一类标记单独渲染成针。
+>
+> **锚点必须是 `bottom-center`**：针的尖要落在点下去的位置。用默认的 `center` 会让针尖
+> 悬在点击点上方半个针高（18px），"点哪儿打哪儿"就偏了。移动端也是 `bottom-center`。
+
+`ui/widgets/map_point_items_window.dart` 里的高度是**互相引用的常量**，改任何一个都不会算漏：
+
+```
+卡高 118 = 图 76 + 间距 5 + 标题 14 + 间距 2 + 价格 21
+窗口 134 = 卡高 118 + ListView 上下内边距 8×2
+```
+
+> ⚠️ 2026-10-02 踩过：小窗高度硬编码 132 而内容是 134 —— 真机上 Flutter 直接把
+> `BOTTOM OVERFLOWED BY 3.0 PIXELS` 的黄黑条画在小窗上，价格那行被挤掉，
+> 用户看到的就是"小窗显示有问题"。**固定高度的容器，每个孩子的高度都要显式定死**
+> （标题 14 / 价格 21），别让它们按字体自己撑 —— 系统字号一变就溢出。
+>
+> 写这个测试本身也有两个坑（已写在测试文件顶部）：
+> `NetImage` 是 `ConsumerWidget`，不 override provider 会抛异常并拿到**无限高度约束**
+> （报一个 10 万像素的假溢出）；`PriceText` 内部是 `RichText`，
+> `find.textContaining` 抓不到，要按 `RichText` 的合并文本找。
+
 
 **2) 自检 Key 是否可用**（用真实浏览器渲染，截图作为判据）：
 
@@ -421,6 +744,33 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 | 商品详情「在地图上看」（带 `?itemId=`） | **只显示这件商品所在的那一个面交点**，红色气泡 + 呼吸圈；顶部提示条可一键「显示全部点位」 |
 | 商品没设面交点时 | 不进入焦点模式，正常显示全部（避免地图空着让人以为坏了） |
 
+**点交易点 → 就地看商品（移动端，2026-10-02）**
+
+点地图上的交易点，底部弹**商品小窗**（高 132px，横向滑动，只占屏幕约 1/6）：
+
+- 小窗在上、点位信息条在下，**不跳页**（以前点「看商品」会 push 一个整页列表，地图就看不见了）；
+- 小窗里的卡片是"图 + 标题一行 + 价格"，整块可点进商品详情；
+- 点位信息条右侧保留了「看全部」入口（要挑选时仍可进整页）；
+- 一件都没有时小窗**不占位置**（信息条里已经写了"暂无在售"）。
+
+> ⚠️ **两个件数口径别混用**（踩过）：
+> `itemCount` 是"还有戏"（草稿/审核中/在售/已锁定），`onSaleCount` 才只有在售。
+> 气泡当初用的是前者，于是出现"气泡写着 11 件在售、点开小窗只有 10 件" ——
+> 差的那些还在审核中，买家本来就看不到。现在**展示给买家的都用 `onSaleCount`**，
+> 但**清理空点位等运营逻辑仍必须用 `itemCount`**（审核中的商品也算这个点位的，见上文）。
+
+**按点位查商品**：`GET /api/v1/items?preferPointId=2`
+（以前移动端是"拉 50 条再按 `preferPointName` 过滤"：同名点位会串、超过一页就漏。
+注意 ES 索引里没有这个字段，所以带 `preferPointId` 的查询**强制走 MySQL**，
+见 `ItemSearchService.supports`。）
+
+> ⚠️ **改了接口响应结构要清地图缓存**：`/map/points` 有 30 分钟 Redis 缓存
+> （`ershou:map:points:{campus}:v{ver}`），版本号只在写点位时自增 ——
+> 部署新代码后缓存里还是**旧结构**（新字段是 null），表现是"新写的字段没生效"。
+> 排查前先 `DEL ershou:map:points:*`。
+> 同理：`Item` 实体上 `select(...)` 精简列时，**上层要用到的列必须一起 select**，
+> 否则字段是 null、过滤静默失效（`onSaleCount` 恒为 0 就是这么来的）。
+
 修的问题：
 
 | 问题 | 原因 | 现在 |
@@ -508,6 +858,14 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 > 两个测试都踩过的坑：**私聊内容是加密存储的**（库里是 `v1:xxx` 密文），验证通知必须走接口读明文，
 > 直接 SQL `LIKE '%文字%'` 永远查不到。
 
+**约面交的规则（买家只提意向，卖家定地点时间）**
+
+- 买家点「约面交」**只表达意向**：不填面交点、不填时间窗；
+- 服务端**忽略**买家传的 `pointId` / `timeSlot*`：面交点改用**商品自己关联的点位**（卖家发布时选的），时间窗留空 = 待协商。这是防"直接调接口替卖家做决定"，前端不传只是第一层；
+- **同一买家 + 同一商品同时只能有一张进行中的面交单**（状态 1/2）：重复提交返回 40003；购物车合并结算走同一道校验，绕不过去；
+- 前端：详情页按钮约过就灰并改文案（「已约，等卖家确认」/「已约好，待面交」），下单成功后立即刷新；
+- 回归：`powershell -File scripts/verify-book-once.ps1`（17 项）+ `node scripts/verify-book-button-mobile.mjs`（13 项）
+
 **购物车（`/api/v1/cart`）**
 
 - **加购即校验**：已售出 / 已锁定 / 自己的商品 / 超库存都会被拒（和结算同一套口径），不然前端显示成可结算、到结算才失败，用户白跑一趟；
@@ -515,6 +873,27 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 - **结算不会因一件坏商品整批失败**：先按状态分流，能约的照常提交，不能约的逐条回报在 `skipped: [{cartId,itemId,title,reason}]` 里，前端弹窗列出哪件、为什么；
 - 拆单语义：**每件商品一张面交单**（同一个卖家的多件也是多张），只是共用一个 `batchNo`；
 - 移动端与 Web 端同一套接口与语义；回归：`powershell -File scripts/verify-cart.ps1`（31 项）
+
+**私聊的两个历史坑（都修了，别再踩）**
+
+- **渲染路径上的取值一律要兜底**：`canRecall` 里 `msg.createdAt.replace(...)` 一旦命中缺字段的消息，就会在**模板渲染时抛错** —— Vue 的渲染是一抛全停，整棵子树停止更新。表现极具误导性：**按 Enter 发不出去、输入框不清空、发送按钮永久 loading**，看着像"发送功能坏了"，其实是渲染崩了把 submit 的后续语句一起带走了。现在所有消息入口（历史 / WS `message` / WS `ack` / 撤回）都过 `normalizeMessage()` 补字段；
+- **新号每日私聊限额默认关闭**（`ershou.chat.daily-limit-enabled=false`）：校园场景"注册 7 天内每天 20 条"太容易误伤，正常砍价来回几句就见底；代码与配置都保留，需要时打开开关即可。
+
+**私聊实时性：链路怎么验、断线怎么发现**
+
+- 链路三段分开验，别一上来就怀疑后端：
+  `node scripts/probe-ws.mjs <token>`（能不能连；Vite 代理 5173 与后端 8080 各测一遍）→
+  `node scripts/probe-ws-realtime.mjs <aToken> <bToken> <sessionId> <peerId>`（A 发 B 收，验投递）→
+  `node scripts/probe-web-realtime.mjs <bToken> <aToken> <sessionId>`（真浏览器里看 DOM 有没有自动更新）；
+- **WS 帧是扁平的**：`{type:'send', sessionId, msgType, content, clientMsgId}`。
+  套一层 `data` 会让服务端把 sessionId 读成 0 → `70002 会话不存在`（写探针时踩过这个坑）；
+- 推送**绝不静默丢弃**：列表还没加载时先补历史再合并（以前 `if (!list) return` 直接扔，
+  表现就是"对方发了消息我要刷新才看得到"）；
+- 心跳带**看门狗**：超过 2 个周期没收到 `pong` 判定假死 → 主动断开重连。TCP 层"连着"但僵死时
+  `onclose` 不会触发，没有看门狗界面会静默地不再实时；
+- 断线时聊天窗顶部有明确提示条（`node scripts/probe-ws-blocked-notice.mjs <token> <sessionId>` 验证）。
+- **重连要能自愈**：`connect()` 里 socket 不在 OPEN 态就丢弃重建，并且**每次重连都重置退避计数** —— 否则「连上→断→重试耗尽」之后就永久不再重连，只能刷新页面；
+- 排查聊天页前端问题先跑 `node scripts/probe-chat-errors.mjs <token> <peerToken> <sessionId>`：它在「收到推送」前后各测一次输入框是否还活着，并把 pageerror / Vue warn 全部打出来（渲染报错会让整棵子树停止更新，表现正是「打字没反应 + 消息不出现」）。
 
 **红点规则（网页端导航）**
 

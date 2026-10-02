@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Location, Refresh } from '@element-plus/icons-vue'
+import { Location, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import {
   acceptMeetupOrder,
   cancelMeetupOrder,
@@ -12,11 +12,17 @@ import {
 } from '@/api/order'
 import type { OrderRole, OrderVO } from '@/api/order'
 import { useMeetupStore } from '@/stores/meetup'
-import { formatDateTime, formatPrice, orderStatusTagType } from '@/utils/format'
+import { formatDateTime, formatPrice, ORDER_STATUS, orderStatusTagTypeByCode } from '@/utils/format'
 
-/** 面交单状态：1 待卖家确认 / 2 待面交 / 3 已完成 / 4 已取消 / 5 已失效 */
-const STATUS_PENDING = 1
-const STATUS_WAITING = 2
+/**
+ * 状态码统一从 `utils/format` 的字典取（后端 OrderService.statusText 是同一份口径）。
+ * 以前这里自己写了一套裸数字 1/2/4/5，颜色又按 statusText 关键字猜，
+ * 于是「已失效」落到默认的 primary（品牌绿）—— 作废的单子看着像好消息。
+ */
+const STATUS_PENDING = ORDER_STATUS.PENDING_SELLER
+const STATUS_WAITING = ORDER_STATUS.WAITING
+const STATUS_CANCELLED = ORDER_STATUS.CANCELLED
+const STATUS_INVALID = ORDER_STATUS.INVALID
 
 const router = useRouter()
 const meetupStore = useMeetupStore()
@@ -41,6 +47,21 @@ function isPending(order: OrderVO): boolean {
 /** 卖家已接受：商品已锁定，等见面 */
 function isWaiting(order: OrderVO): boolean {
   return order.status === STATUS_WAITING
+}
+
+/**
+ * 终态单要显示的原因（已取消 4 / 已失效 5）。
+ *
+ * 后端只会给终态单写 cancel_reason，但历史数据里可能有空值，
+ * 所以这里按状态兜底一句通用文案，避免出现「已失效」后面什么都没有。
+ */
+function closedReason(order: OrderVO): string {
+  if (!isClosed(order)) return ''
+  return order.cancelReason?.trim() || '本次约面交已结束'
+}
+
+function isClosed(order: OrderVO): boolean {
+  return order.status === STATUS_CANCELLED || order.status === STATUS_INVALID
 }
 
 const currentRoleText = computed(() => (role.value === 'buyer' ? '我买到的' : '我卖出的'))
@@ -184,7 +205,7 @@ onMounted(loadOrders)
             <el-tag v-if="role === 'seller' && isWaiting(order) && order.buyerConfirmed" type="success" effect="plain" size="small">
               买家已确认收到
             </el-tag>
-            <el-tag :type="orderStatusTagType(order.statusText)" effect="dark" size="small">
+            <el-tag :type="orderStatusTagTypeByCode(order.status)" effect="dark" size="small">
               {{ order.statusText }}
             </el-tag>
           </span>
@@ -211,6 +232,12 @@ onMounted(loadOrders)
               <template v-else>时间待协商（私聊里定）</template>
             </p>
             <p v-if="order.remark" class="text-muted">留言：{{ order.remark }}</p>
+            <!-- 终态单（已取消 / 已失效）把原因摊开说清楚：商品被卖给别人、被下架等自动作废时，
+                 以前只有一个「已失效」，买家不知道为什么 -->
+            <p v-if="closedReason(order)" class="orders__closed">
+              <el-icon><WarningFilled /></el-icon>
+              {{ closedReason(order) }}
+            </p>
           </div>
         </div>
 
@@ -363,6 +390,18 @@ onMounted(loadOrders)
     align-items: center;
     gap: 4px;
     color: #529b2e;
+  }
+
+  // 终态单的取消 / 失效原因：给一点颜色，别淹没在灰色的元信息里
+  &__closed {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: #fef3f2;
+    color: #b42318 !important;
+    font-size: 12px !important;
   }
 
   &__tags {

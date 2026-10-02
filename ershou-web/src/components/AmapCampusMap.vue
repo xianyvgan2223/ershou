@@ -41,6 +41,12 @@ const props = withDefaults(
      * 只为展示角标，组件本身不做合并计算（合并逻辑在 utils/pointMerge.ts）。
      */
     groupCounts?: Record<number, number>
+    /**
+     * 需要画成"选点针"的点位 id（正在选取的新点位）。
+     * 选点标记**不显示数字气泡** —— 新点位的 itemCount 恒为 0，显示出来就是一个难看的「0」。
+     * 画法与移动端选点针保持一致（见后端 AmapPageController 里的 .pickmark）。
+     */
+    pickPinId?: number | null
     showLegend?: boolean
     showLabel?: boolean
   }>(),
@@ -50,6 +56,7 @@ const props = withDefaults(
     height: '600px',
     selectedId: null,
     highlightPointId: null,
+    pickPinId: null,
     showFitButton: false,
     groupCounts: () => ({}),
     showLegend: true,
@@ -185,6 +192,22 @@ function bubbleHtml(point: MapPoint): string {
     ? `<span class="amap-campus__label">${escapeHtml(point.name)}</span>`
     : ''
   const badge = memberCount > 1 ? `<i class="amap-campus__merged">${memberCount}</i>` : ''
+  // 选点针（pickPinId 指定的那个点位）：画成"水滴针"而不是数字气泡。
+  //
+  // 为什么要有这个分支：泡默认显示 itemCount，而**正在选取的新点位 itemCount 恒为 0**，
+  // 于是选点标记上就是一个孤零零的「0」—— 用户的原话是"零图标很难看"。
+  // 移动端选点用的是专门的针形标记（见 AmapPageController 里的 .pickmark），
+  // 这里**照抄同一套画法**（橙色圆头 + 白描边 + 白芯 + 旋转 45° 的尖 + 地面小椭圆 + 投影），
+  // 保证两端选点看到的是同一个东西。
+  if (props.pickPinId != null && point.id === props.pickPinId) {
+    return `<div class="amap-campus__marker amap-campus__marker--pick" data-point-id="${point.id}">
+        <span class="amap-campus__pickmark">
+          <span class="amap-campus__pickmark-head"></span>
+          <span class="amap-campus__pickmark-foot"></span>
+        </span>
+        ${label}
+      </div>`
+  }
   // ⚠️ 角标必须锚在**气泡**上，所以要给气泡单独套一层 relative 的 .amap-campus__pin。
   // 直接挂在 .amap-campus__marker 上会飘走：那个容器是 flex-column 且含名称标签，
   // 宽度被标签撑大、top 又对着标签上方 —— 角标会跑到标签右上角、离气泡很远（踩过）。
@@ -227,11 +250,15 @@ function renderMarkers(): void {
   props.points.forEach((point) => {
     const lngLat = pointLngLat(point)
     if (!lngLat) return
+    // 选点针的锚点必须是 bottom-center：针尖对着点下去的位置。
+    // 用默认的 center 会让针尖悬在点击点上方 18px（半个针高），"点哪儿打哪儿"就偏了。
+    // 移动端也是 bottom-center（见 AmapPageController 的 setPickMarker），两端保持一致。
+    const isPickPin = props.pickPinId != null && point.id === props.pickPinId
     const marker = new AMapRef!.Marker({
       position: lngLat,
       content: bubbleHtml(point),
-      anchor: 'center',
-      zIndex: props.selectedId === point.id ? 200 : 100,
+      anchor: isPickPin ? 'bottom-center' : 'center',
+      zIndex: isPickPin ? 250 : props.selectedId === point.id ? 200 : 100,
       title: `${point.name}（${pointTypeLabel(point.type)}）· ${point.itemCount} 件在售`,
       // 标记内部是自定义 DOM，必须让 AMap 把点击事件透进来，否则 marker 收不到 click
       clickable: true,
@@ -784,6 +811,90 @@ watch(pickable, (value) => {
 
     50% {
       box-shadow: 0 0 0 10px rgb(239 68 68 / 10%);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 选点针：与移动端选点标记同一套画法（后端 AmapPageController 的 .pickmark）
+   * 橙色圆头 + 白描边 + 白芯 + 旋转 45° 的尖 + 地面小椭圆 + 投影。
+   * 用它代替"数字气泡"，因为新点位 itemCount 恒为 0，气泡上会是个难看的「0」。
+   * ------------------------------------------------------------------ */
+  :deep(.amap-campus__pickmark) {
+    position: relative;
+    display: block;
+    width: 26px;
+    height: 36px;
+    // 投影让针"浮"在地图上；与移动端同一个参数
+    filter: drop-shadow(0 3px 6px rgb(0 0 0 / 32%));
+    // 选点时点上一次播一次"掉落"动画，让"点哪儿打哪儿"看得见（移动端同款）
+    animation: amap-pickdrop 0.26s ease-out;
+  }
+
+  :deep(.amap-campus__pickmark-head) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    width: 26px;
+    height: 26px;
+    border: 2.5px solid #fff;
+    border-radius: 50%;
+    background: var(--accent-500);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 30%);
+
+    /* 水滴的尖：旋转 45° 的方块，只露一角在圆形下方 */
+    &::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 20px;
+      width: 11px;
+      height: 11px;
+      margin-left: -5.5px;
+      border-radius: 0 0 2px 0;
+      background: var(--accent-500);
+      transform: rotate(45deg);
+    }
+
+    /* 圆心的白点：和移动端一样，看起来像"靶心" */
+    &::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 9px;
+      width: 8px;
+      height: 8px;
+      margin: -4px 0 0 -4px;
+      border-radius: 50%;
+      background: #fff;
+    }
+  }
+
+  /* 地面小椭圆：给"针扎在地上"一点纵深感 */
+  :deep(.amap-campus__pickmark-foot) {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 14px;
+    height: 5px;
+    margin-left: -7px;
+    border-radius: 50%;
+    background: rgb(0 0 0 / 22%);
+  }
+
+  @keyframes amap-pickdrop {
+    0% {
+      transform: translateY(-14px);
+      opacity: 0;
+    }
+
+    60% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translateY(0);
     }
   }
 

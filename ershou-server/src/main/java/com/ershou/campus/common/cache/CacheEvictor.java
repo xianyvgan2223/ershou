@@ -91,6 +91,11 @@ public class CacheEvictor {
         bumpMapVersion();
     }
 
+    /** 运营后台概览统计：任何后台写操作都会改变待办数字，直接删掉让它下次重算 */
+    public void adminDashboard() {
+        deleteKeys(List.of(RedisKeys.adminDashboard()));
+    }
+
     /** 当前地图缓存版本号：读接口把它拼进 key，写接口自增它 */
     public long mapVersion() {
         try {

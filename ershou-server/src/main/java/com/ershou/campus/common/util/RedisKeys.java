@@ -133,6 +133,16 @@ public final class RedisKeys {
         return "ershou:admin:dashboard";
     }
 
+    /** 上架审核跨实例广播频道（Pub/Sub）：新商品上架 / 被处置时通知所有审核员 */
+    public static String adminReviewChannel() {
+        return "ershou:admin:review:channel";
+    }
+
+    /** 上架审核：正在看审核页的审核员心跳（field=userId，value=昵称，过期即离线） */
+    public static String adminReviewOnline() {
+        return "ershou:admin:review:online";
+    }
+
     /** ES 商品索引的增量同步水位（epoch millis） */
     public static String itemIndexWatermark() {
         return "ershou:item:index:watermark";

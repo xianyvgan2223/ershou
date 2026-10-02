@@ -10,11 +10,15 @@ import com.ershou.campus.common.result.ResultCode;
 import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.admin.dto.BatchItemAuditDTO;
 import com.ershou.campus.module.admin.dto.ItemRejectDTO;
+import com.ershou.campus.module.admin.entity.ItemReview;
+import com.ershou.campus.module.admin.entity.SysAuditLog;
+import com.ershou.campus.module.admin.mapper.SysAuditLogMapper;
 import com.ershou.campus.module.admin.vo.AdminItemVO;
 import com.ershou.campus.module.admin.vo.BatchAuditResultVO;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
 import com.ershou.campus.module.item.service.ItemService;
+import com.ershou.campus.module.order.service.OrderService;
 import com.ershou.campus.module.search.service.ItemIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +52,12 @@ public class AdminItemService {
     private final AuditLogService auditLogService;
     private final AdminViewAssembler assembler;
     private final CacheEvictor evictor;
+    /** 强制下架时顺手收掉挂在该商品上的约面交单 */
+    private final OrderService orderService;
+    /** 审核通过后登记进「上架审核」页 */
+    private final ItemReviewService reviewService;
+    /** 判定"是不是违规后二次申请"要看历史处置记录 */
+    private final SysAuditLogMapper sysAuditLogMapper;
 
     /** status 为空 = 全部状态（商品管理）；传 1 = 审核队列（按提交先后，先到先审） */
     public PageResult<AdminItemVO> page(Integer status, String keyword, Long sellerId,
@@ -84,10 +94,36 @@ public class AdminItemService {
             throw new BizException(ResultCode.ADMIN_ITEM_STATUS, "仅“审核中”的商品可以通过");
         }
         afterItemWrite(itemId);
+        // 通过后就在售了 —— 这条（尤其是"违规后二次申请上架"的商品）要进「上架审核」页留痕，
+        // 让审核员确认"它真的已经挂出来了、内容就是这一版"
+        reviewService.onItemLiveOptimistic(itemId,
+                isViolationRelist(before) ? ItemReview.TYPE_VIOLATION_RELIST : ItemReview.TYPE_NEW);
         auditLogService.record(operatorId, "item", "approve", "item", itemId,
                 state("status", before.getStatus(), "auditReason", before.getAuditReason()),
                 state("status", STATUS_ON_SALE, "auditResult", 1, "auditReason", APPROVE_REASON));
         log.info("[admin][item][{}][approve][operator={}]", itemId, operatorId);
+    }
+
+    /**
+     * 是不是"违规后二次申请"。
+     *
+     * <p>判据是"曾经违规过"而不是"这次从哪个状态过来的"：{@code applyRelist} 把商品置成
+     * 审核中(1)，而 AI 机审转人工也是(1)，光看前状态分不出来；这时看该商品历史上
+     * 有没有被违规下架过（审核日志里有 force-offline / review-item-offline 记录）更准。
+     */
+    private boolean isViolationRelist(Item before) {
+        if (before.getStatus() != null && before.getStatus() == STATUS_VIOLATION) {
+            return true;
+        }
+        try {
+            Long hit = sysAuditLogMapper.selectCount(Wrappers.<SysAuditLog>lambdaQuery()
+                    .eq(SysAuditLog::getModule, "item")
+                    .eq(SysAuditLog::getTargetId, before.getId())
+                    .in(SysAuditLog::getAction, "force-offline", "review-item-offline"));
+            return hit != null && hit > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -161,10 +197,13 @@ public class AdminItemService {
         if (rows == 0) {
             throw new BizException(ResultCode.ADMIN_ITEM_STATUS, "已售出/已超期/已强制下架的商品无需再下架");
         }
+        // 商品已被下架：挂在上面的约面交意向与待面交单必须一起收掉。
+        // 尤其是"已锁库(3)时被强制下架"——锁永远等不到释放，不收就是永久僵尸单。
+        int closed = orderService.closeActiveOrders(itemId, "商品已被平台下架，本次约面交自动作废");
         afterItemWrite(itemId);
         auditLogService.record(operatorId, "item", "force-offline", "item", itemId,
                 state("status", before.getStatus()), state("status", STATUS_VIOLATION, "reason", reason));
-        log.info("[admin][item][{}][force-offline][operator={}]", itemId, operatorId);
+        log.info("[admin][item][{}][force-offline][operator={}] 同时作废 {} 张挂单", itemId, operatorId, closed);
     }
 
     /** 审核 / 下架后的统一收尾：同步搜索索引 + 失效商品缓存与地图在售数 */

@@ -24,4 +24,33 @@ public interface ChatSessionMapper extends BaseMapper<ChatSession> {
 
     @Update("UPDATE chat_session SET unread_b = 0 WHERE id = #{id}")
     int clearUnreadB(@Param("id") Long id);
+
+    /**
+     * 删除聊天记录（每用户软删除）：只标记我这一侧，未读一并归零。
+     *
+     * <p>未读为什么要一起归零：删掉的会话不该再贡献红点 ——
+     * 列表里都看不到了、角标还挂着数字，用户只会觉得"红点消不掉"
+     * （这个项目的未读角标本来就踩过僵尸字段的坑）。
+     *
+     * @param sinceA true = 我是 user_a（标记 deleted_a），false = 我是 user_b
+     */
+    @Update("UPDATE chat_session SET "
+            + "deleted_a = IF(#{sinceA}, 1, deleted_a), deleted_b = IF(#{sinceA}, deleted_b, 1), "
+            + "deleted_a_at = IF(#{sinceA}, NOW(), deleted_a_at), "
+            + "deleted_b_at = IF(#{sinceA}, deleted_b_at, NOW()), "
+            + "unread_a = IF(#{sinceA}, 0, unread_a), unread_b = IF(#{sinceA}, unread_b, 0) "
+            + "WHERE id = #{id}")
+    int markDeleted(@Param("id") Long id, @Param("sinceA") boolean sinceA);
+
+    /**
+     * 撤销删除（再次从商品发起会话 / 对方又发来消息）：把双方标记都清掉。
+     *
+     * <p>会话重新可用时两边都该看到它 —— 只要有一侧没删、会话就能用，
+     * 那另一侧下次进来发现"会话还在、只是我删过"反而更困惑。
+     * 条件里带上 {@code deleted_a = 1 OR deleted_b = 1}，没有删除过就不产生无谓写入。
+     */
+    @Update("UPDATE chat_session SET deleted_a = 0, deleted_b = 0, "
+            + "deleted_a_at = NULL, deleted_b_at = NULL WHERE id = #{id} "
+            + "AND (deleted_a = 1 OR deleted_b = 1)")
+    int restoreDeleted(@Param("id") Long id);
 }

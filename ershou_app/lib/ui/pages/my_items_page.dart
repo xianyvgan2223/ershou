@@ -49,8 +49,7 @@ class _MyItemsPageState extends ConsumerState<MyItemsPage> {
     }
   }
 
-  Future<void> _offline(Item item) async {
-    final ok = await showDialog<bool>(
+  Future<void> _offline(Item item) async {    final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('下架商品'),
@@ -77,6 +76,20 @@ class _MyItemsPageState extends ConsumerState<MyItemsPage> {
       if (mounted) showToast(context, e.message);
     } catch (e) {
       if (mounted) showToast(context, '下架失败：' + e.toString());
+    }
+  }
+
+  /// 重新上架：已下架 / 已过期 重挂满 7 天，不用重填标题图片
+  Future<void> _relist(Item item) async {
+    try {
+      await ref.read(itemWriteRepositoryProvider).relist(item.id);
+      if (!mounted) return;
+      showToast(context, '已重新上架，有效期重新开始计时');
+      await _load();
+    } on ApiException catch (e) {
+      if (mounted) showToast(context, e.message);
+    } catch (e) {
+      if (mounted) showToast(context, '重新上架失败：$e');
     }
   }
 
@@ -141,8 +154,35 @@ class _MyItemsPageState extends ConsumerState<MyItemsPage> {
                                 child: const Text('下架',
                                     style: TextStyle(fontSize: 12.5)),
                               )
+                            // 已下架 / 已过期：一键重新挂满 7 天（后端不重过机审、不占发布额度）
+                            else if (item.canRelist)
+                              TextButton(
+                                onPressed: () => _relist(item),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  minimumSize: const Size(0, 30),
+                                  foregroundColor: AppColors.brandDark,
+                                ),
+                                child: const Text('重新上架',
+                                    style: TextStyle(fontSize: 12.5)),
+                              )
                             else if (!item.onSale && item.statusText != '已下架')
                               TagChip(text: item.statusText.isEmpty ? '已售出' : item.statusText),
+                            // 有效期倒计时：只给"还在卖"的商品看
+                            if (item.onSale && item.daysLeft != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                item.daysLeft == 0
+                                    ? '即将自动下架'
+                                    : '还剩 ${item.daysLeft} 天自动下架',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: (item.daysLeft ?? 9) <= 1
+                                      ? AppColors.price
+                                      : AppColors.inkFaint,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       );

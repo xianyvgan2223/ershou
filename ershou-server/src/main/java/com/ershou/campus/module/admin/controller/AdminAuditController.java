@@ -6,6 +6,7 @@ import com.ershou.campus.module.admin.dto.BatchItemAuditDTO;
 import com.ershou.campus.module.admin.dto.ItemRejectDTO;
 import com.ershou.campus.module.admin.dto.PointApproveDTO;
 import com.ershou.campus.module.admin.dto.PointRejectDTO;
+import com.ershou.campus.module.admin.dto.PointStatusDTO;
 import com.ershou.campus.module.admin.service.AdminAuthService;
 import com.ershou.campus.module.admin.service.AdminItemService;
 import com.ershou.campus.module.admin.service.AdminOverviewService;
@@ -85,15 +86,17 @@ public class AdminAuditController {
                 .toList());
     }
 
-    @Operation(summary = "点位审核队列（默认待审 auditStatus=0）")
+    @Operation(summary = "点位列表（默认待审 auditStatus=0；auditStatus 传负数=不限审核状态，status 筛地图启用状态）")
     @GetMapping("/audit/points")
     public Result<PageResult<AdminPointVO>> auditPoints(@RequestParam(required = false) Integer auditStatus,
                                                         @RequestParam(required = false) Long campusId,
                                                         @RequestParam(required = false) String keyword,
+                                                        @RequestParam(required = false) Integer status,
                                                         @RequestParam(defaultValue = "1") long pageNum,
                                                         @RequestParam(defaultValue = "20") long pageSize) {
         adminAuthService.requireAdminId();
-        return Result.ok(pointService.page(auditStatus == null ? 0 : auditStatus, campusId, keyword, pageNum, pageSize));
+        return Result.ok(pointService.page(auditStatus == null ? 0 : auditStatus, campusId, keyword, status,
+                pageNum, pageSize));
     }
 
     @Operation(summary = "点位审核通过（可顺带校准安全分与指引）")
@@ -107,6 +110,13 @@ public class AdminAuditController {
     @PostMapping("/audit/points/{id}/reject")
     public Result<Void> rejectPoint(@PathVariable Long id, @Valid @RequestBody PointRejectDTO dto) {
         pointService.reject(id, dto, adminAuthService.requireAdminId());
+        return Result.ok();
+    }
+
+    @Operation(summary = "启用 / 停用（下架）面交点")
+    @PostMapping("/points/{id}/status")
+    public Result<Void> updatePointStatus(@PathVariable Long id, @Valid @RequestBody PointStatusDTO dto) {
+        pointService.updateStatus(id, dto, adminAuthService.requireAdminId());
         return Result.ok();
     }
 }

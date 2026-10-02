@@ -105,6 +105,15 @@ const reverseCache = new Map<string, GeoCandidate[]>()
 
 const pickedPoints = ref<MapPoint[]>([])
 
+/**
+ * "正在选取的新点位"用的固定 id。
+ *
+ * 它是个**尚未保存**的点，所以给个不可能是真实点位（真实 id 都是正数）的负数，
+ * 用来告诉地图组件"这个点要画成选点针，不要画成数字气泡"——
+ * 新点位的 itemCount 恒为 0，画成气泡就是一个难看的「0」。
+ */
+const PICKED_POINT_ID = -1
+
 function refreshPickedMarker(): void {
   if (!picked.value) {
     pickedPoints.value = []
@@ -112,7 +121,7 @@ function refreshPickedMarker(): void {
   }
   pickedPoints.value = [
     {
-      id: -1,
+      id: PICKED_POINT_ID,
       name: pickedName.value || '新点位',
       type: pointType.value,
       coordX: null,
@@ -523,6 +532,7 @@ onMounted(applyPresetPick)
           :points="pickedPoints"
           :map-config="effectiveMapConfig"
           :show-legend="false"
+          :pick-pin-id="PICKED_POINT_ID"
           height="500px"
           @pick="onPick"
         />

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kDebugMode;
@@ -9,8 +10,10 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/providers.dart';
 import '../../core/utils/coord.dart';
 import '../../core/utils/point_merge.dart';
+import '../../data/models.dart';
 import '../../data/models2.dart';
 import '../theme/app_theme.dart';
+import '../widgets/map_point_items_window.dart';
 import '../widgets/common.dart';
 import 'items_by_point_page.dart';
 
@@ -49,6 +52,15 @@ class _MapPageState extends ConsumerState<MapPage> {
   String? _error;
   /// 后端没配高德 key 时退回自绘底图
   bool _amapReady = false;
+
+  /// 选中点位的在售商品（地图上的商品小窗）。
+  ///
+  /// 为什么按点位 id 精确查而不是"拉一批再按名称过滤"：
+  /// 同名点位会串在一起、超过一页就漏；而且点位查询本来就只有几条。
+  List<Item> _pointItems = const [];
+  bool _pointItemsLoading = false;
+  /// 小窗当前展示的点位 id：切点位时旧商品不能先闪一下再换
+  int? _pointItemsFor;
 
   @override
   void initState() {
@@ -153,7 +165,8 @@ class _MapPageState extends ConsumerState<MapPage> {
       return {
         'id': rep.id,
         'name': g.name,
-        'itemCount': g.itemCount,
+        // 气泡上的件数用「在售」口径，和点开小窗能看到的条数一致
+        'itemCount': g.members.fold<int>(0, (sum, m) => sum + _onSaleOf(m)),
         'minPrice': g.minPrice,
         'lng': rep.lng,
         'lat': rep.lat,
@@ -237,9 +250,71 @@ class _MapPageState extends ConsumerState<MapPage> {
         _selectedGroup = group;
       });
       _centerOn(hit);
+      // 就地拉该点位的商品，填进小窗（不再跳整页）
+      unawaited(_loadPointItems(hit));
       return;
     }
   }
+
+  /// 拉某个点位的在售商品（小窗用）。
+  ///
+  /// `pointItemCount` 是后端聚合出来的在售件数：为 0 时直接跳过请求，
+  /// 免得每次点空点位都打一次接口。
+  /// 小窗加载：用"买家可见数"决定要不要请求，避免点空点位白打一次接口
+  Future<void> _loadPointItems(MapPoint p) async {
+    if (_onSaleOf(p) <= 0) {
+      setState(() {
+        _pointItems = const [];
+        _pointItemsFor = p.id;
+        _pointItemsLoading = false;
+      });
+      return;
+    }
+    setState(() {
+      _pointItemsLoading = true;
+      _pointItemsFor = p.id;
+      // 立刻清空：否则切到另一个点位时，会先显示上一个点位的商品再被替换
+      _pointItems = const [];
+    });
+    try {
+      final page = await ref
+          .read(itemRepositoryProvider)
+          .page(pageSize: 12, preferPointId: p.id);
+      if (!mounted || _pointItemsFor != p.id) return; // 已经切走了，丢弃这次结果
+      setState(() {
+        _pointItems = page.records.where((i) => i.onSale).toList();
+        _pointItemsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || _pointItemsFor != p.id) return;
+      setState(() {
+        _pointItems = const [];
+        _pointItemsLoading = false;
+      });
+    }
+  }
+
+  /// 关闭小窗与点位卡片（点小窗右上角 ✕ 或点位卡片 ✕）
+  void _clearSelection() {
+    setState(() {
+      _selected = null;
+      _selectedGroup = null;
+      _pointItems = const [];
+      _pointItemsFor = null;
+    });
+  }
+
+  /// 点位"买家真的能看到几件"。
+  ///
+  /// 后端给了两个数：`itemCount` 是"还有戏"（草稿/审核中/在售/已锁定），
+  /// `onSaleCount` 只有在售。**展示给买家的一律用后者** ——
+  /// 用前者会出现"气泡写着 11 件在售、点开小窗只有 10 件"（差的那些还在审核中，
+  /// 买家本来就看不到）。
+  ///
+  /// 为什么兜底成 `itemCount` 而不是 0：后端与 App 不是同时升级的，
+  /// 老后端不下发 `onSaleCount`（全是 0），兜成 0 会让小窗永远不显示 ——
+  /// 那比"数字差一两件"严重得多。
+  static int _onSaleOf(MapPoint p) => p.onSaleCount > 0 ? p.onSaleCount : p.itemCount;
 
   /// 自检：让页面用 JS 点一下第一个气泡，验证整条点击链路。
   /// 只在 debug 构建里跑（release 不会输出这些日志）。
@@ -372,11 +447,34 @@ class _MapPageState extends ConsumerState<MapPage> {
         // 附近点位（Redis GEO）：竖直小胶囊列表，只在定位后出现
         if (_nearby.isNotEmpty)
           Positioned(left: 10, top: 12, child: _nearbyColumn()),
-        // 选中点位：底部悬浮小卡片
+        // 选中点位：商品小窗 + 点位信息条（都在底部，小窗在上、信息条在下）
         if (_selected != null)
-          Positioned(left: 10, right: 10, bottom: 12, child: _pointCard(_selected!)),
+          Positioned(
+            left: 10,
+            right: 10,
+            bottom: 12,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _pointItemsWindow(_selected!),
+                const SizedBox(height: 8),
+                _pointCard(_selected!),
+              ],
+            ),
+          ),
       ],
     );
+  }
+
+  /// 商品小窗：点位下的在售商品，横向滑动。
+  ///
+  /// 实现抽到 [MapPointItemsWindow]（独立组件），这样布局能被 widget 测试直接覆盖 ——
+  /// 它的高度是固定值，"固定高度装不下内容"正是它出过的 bug：
+  /// 132 的窗口装 134 的内容，真机上 Flutter 会把 "BOTTOM OVERFLOWED BY 3.0 PIXELS"
+  /// 的黄黑条直接画出来，价格那行被挤掉。详见该组件的类注释。
+  Widget _pointItemsWindow(MapPoint p) {
+    final loading = _pointItemsLoading || _pointItemsFor != p.id;
+    return MapPointItemsWindow(items: _pointItems, loading: loading);
   }
 
   Widget _webArea() {
@@ -458,7 +556,11 @@ class _MapPageState extends ConsumerState<MapPage> {
     final group = _selectedGroup;
     final merged = group != null && group.merged;
     final title = merged ? group.name : p.name;
-    final count = merged ? group.itemCount : p.itemCount;
+    // 件数用「在售」口径（_onSaleOf），与小窗里实际能看到的条数一致；
+    // 合并组按组内各点求和。
+    final count = merged
+        ? group.members.fold<int>(0, (sum, m) => sum + _onSaleOf(m))
+        : _onSaleOf(p);
     return Material(
       color: Colors.white,
       elevation: 4,
@@ -527,14 +629,11 @@ class _MapPageState extends ConsumerState<MapPage> {
                 minimumSize: const Size(0, 34),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: Text(count == 0 ? '无在售' : '看商品',
+              child: Text(count == 0 ? '无在售' : '看全部',
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             ),
             IconButton(
-              onPressed: () => setState(() {
-                _selected = null;
-                _selectedGroup = null;
-              }),
+              onPressed: _clearSelection,
               icon: const Icon(Icons.close, size: 16),
               visualDensity: VisualDensity.compact,
               color: AppColors.inkFaint,

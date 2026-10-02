@@ -27,6 +27,14 @@ public class OrderVO {
     private Long sellerId;
     private String sellerName;
     private String remark;
+    /**
+     * 取消 / 失效原因。
+     *
+     * <p>这个字段一直只存在库里和私聊消息里，"我的面交"卡片只看得到一个光秃秃的
+     * 「已失效」—— 商品被卖给别人、被下架导致自动作废时，买家不知道为什么。
+     * 现在随列表一起下发，前端在终态单上直接展示。
+     */
+    private String cancelReason;
     private LocalDateTime createdAt;
     private LocalDateTime verifiedAt;
     private Boolean buyerConfirmed;

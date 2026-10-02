@@ -11,6 +11,17 @@ export interface AdminDashboard {
   totalUsers: number
   bannedUsers: number
   todayOperations: number
+  /**
+   * 面交单与点位补充统计。
+   * 标成可选是为了兼容没重启的旧后端：那时候这几个字段还没下发，
+   * 页面按 0 兜底而不是显示 undefined。
+   */
+  totalOrders?: number
+  activeOrders?: number
+  doneOrders?: number
+  riskOrders?: number
+  todayOrders?: number
+  disabledPoints?: number
 }
 
 /** 运营后台的商品视图 */
@@ -57,6 +68,9 @@ export interface AdminPoint {
   pointType?: number
   coordX?: number
   coordY?: number
+  /** 第三方地图经纬度；用户提交的点位通常只有经纬度 */
+  lng?: number | null
+  lat?: number | null
   safetyScore?: number
   safeTags?: string[]
   guideText?: string | null
@@ -184,11 +198,30 @@ export function fetchRejectReasons(scope: AuditScope): Promise<RejectReason[]> {
   return http.get<RejectReason[]>('/admin/audit/reject-reasons', { scope })
 }
 
-/** 点位审核队列 */
+/** 点位列表 / 审核队列 */
 export function fetchAuditPoints(
-  params: PageQuery & { auditStatus?: number; campusId?: number; keyword?: string },
+  params: PageQuery & {
+    /** 0 待审 / 1 已通过 / 2 已驳回；负数 = 不限审核状态 */
+    auditStatus?: number
+    campusId?: number
+    keyword?: string
+    /** 地图启用状态：1 启用 / 0 已下架 */
+    status?: number
+  },
 ): Promise<PageResult<AdminPoint>> {
   return http.get<PageResult<AdminPoint>>('/admin/audit/points', params)
+}
+
+/**
+ * 启用 / 停用（下架）面交点。
+ * 停用会让点位立刻从地图上消失（后端按 `trade_point.status = 1` 过滤），
+ * 用于处置事后发现不合适的用户自定义点位。
+ */
+export function updatePointStatus(
+  id: number,
+  data: { status: number; reason?: string },
+): Promise<null> {
+  return http.post<null>(`/admin/points/${id}/status`, data)
 }
 
 export function approveAuditPoint(
@@ -217,7 +250,7 @@ export function forceOfflineItem(id: number, reason: string): Promise<null> {
 }
 
 export function fetchAdminOrders(
-  params: PageQuery & { status?: number; buyerId?: number; sellerId?: number },
+  params: PageQuery & { status?: number; buyerId?: number; sellerId?: number; keyword?: string },
 ): Promise<PageResult<AdminOrder>> {
   return http.get<PageResult<AdminOrder>>('/admin/orders', params)
 }
@@ -243,7 +276,130 @@ export function adjustUserCredit(
 }
 
 export function fetchAuditLogs(
-  params: PageQuery & { module?: string; operatorId?: number },
+  params: PageQuery & {
+    module?: string
+    action?: string
+    operatorId?: number
+    /** 'yyyy-MM-dd HH:mm:ss'；后端也兼容 ISO 与纯日期 */
+    startTime?: string
+    endTime?: string
+  },
 ): Promise<PageResult<AuditLogItem>> {
   return http.get<PageResult<AuditLogItem>>('/admin/audit-logs', params)
+}
+
+/* ==================================================================
+ *  上架审核（运营后台「上架审核」页）
+ * ================================================================== */
+
+/** 上架审核记录：一条 = 一个商品在本轮上架中的"待确认"状态 */
+export interface ItemReview {
+  id: number
+  itemId: number
+  /** 商品当前标题（实时） */
+  title: string
+  /** 入队时的标题快照；与 title 不同说明卖家在待审期间又改了名 */
+  titleSnapshot?: string | null
+  description?: string | null
+  coverUrl?: string | null
+  images: string[]
+
+  sellerId?: number | null
+  sellerNickname?: string | null
+  sellerPhone?: string | null
+  sellerCreditScore?: number | null
+
+  categoryId?: number | null
+  categoryName?: string | null
+  campusId?: number | null
+  campusName?: string | null
+  preferPointId?: number | null
+  preferPointName?: string | null
+  price?: number | null
+
+  itemStatus?: number | null
+  itemStatusText?: string | null
+  /** 商品是否还能被处置（false = 已被卖掉/下架，按钮置灰） */
+  actionable?: boolean
+
+  /** 1=新上架 2=改名/改描述 3=重新上架 4=违规后二次上架 5=存量导入 */
+  reviewType?: number | null
+  reviewTypeText?: string | null
+  revision?: number | null
+
+  /** 0=待审核 1=已审核 */
+  status?: number | null
+  statusText?: string | null
+  /** 1=已审核 2=已下架 */
+  reviewAction?: number | null
+  reviewActionText?: string | null
+
+  queuedAt?: string | null
+  firstQueuedAt?: string | null
+  contentChangedAt?: string | null
+  reviewedAt?: string | null
+  note?: string | null
+
+  reviewerId?: number | null
+  reviewerNickname?: string | null
+  claimedAt?: string | null
+
+  contentChanged?: boolean
+  violationBefore?: boolean
+  reviewRound?: number
+  rejectCount?: number
+
+  publishedAt?: string | null
+  expireAt?: string | null
+}
+
+/** 上架审核顶部统计 */
+export interface ItemReviewStats {
+  pending: number
+  reviewedToday: number
+  queuedToday: number
+  onSaleTotal: number
+  stalePending: number
+  onlineReviewers: number
+  serverTime?: string | null
+}
+
+export type ReviewScope = 'pending' | 'done' | 'all'
+
+/** 上架审核列表（scope=pending 时含最近 24h 内已处置的，便于回看） */
+export function fetchReviewFeed(
+  params: PageQuery & { scope?: ReviewScope; sellerId?: number; keyword?: string },
+): Promise<PageResult<ItemReview>> {
+  return http.get<PageResult<ItemReview>>('/admin/review/feed', params)
+}
+
+export function fetchReviewStats(): Promise<ItemReviewStats> {
+  return http.get<ItemReviewStats>('/admin/review/stats')
+}
+
+export function fetchReviewDetail(itemId: number): Promise<ItemReview> {
+  return http.get<ItemReview>(`/admin/review/items/${itemId}`)
+}
+
+/** 已审核：确认看过没问题 → 该条从待审列表消失（归档留痕） */
+export function markItemReviewed(itemId: number, note?: string): Promise<ItemReviewStats> {
+  return http.post<ItemReviewStats>(`/admin/review/items/${itemId}/reviewed`, { reason: note })
+}
+
+/** 下架：内容不合适，撤下来（卖家改好可以重新上架） */
+export function offlineReviewItem(itemId: number, reason?: string): Promise<ItemReviewStats> {
+  return http.post<ItemReviewStats>(`/admin/review/items/${itemId}/offline`, { reason })
+}
+
+/** 批量处置：action=review 已审核 / action=offline 下架 */
+export function batchReview(
+  action: 'review' | 'offline',
+  data: { ids: number[]; reason?: string },
+): Promise<BatchAuditResult> {
+  return http.post<BatchAuditResult>(`/admin/review/batch/${action}`, data)
+}
+
+/** 补登记：把"在售却没有审核记录"的商品补进队列（兜底用） */
+export function backfillReviews(limit = 500): Promise<number> {
+  return http.post<number>(`/admin/review/backfill?limit=${limit}`)
 }

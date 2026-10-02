@@ -237,6 +237,20 @@ class ChatDao {
     }
   }
 
+  /// 删除**单个会话**的本地镜像（会话行 + 该会话的全部消息 + 同步水位）。
+  ///
+  /// <p>为什么必须一起删：服务端删除只是把会话从"我的列表"里摘掉，本地库如果还留着
+  /// 会话行与消息，下次冷启动离线打开时会**先渲染本地镜像**，用户就会看到
+  /// "明明删了却又回来了" —— 这是本地镜像与远端不一致导致的假 bug。
+  /// 三个表都要清：会话行消失但消息还在，会留下永远读不到的孤儿消息占空间。
+  Future<void> deleteSession(String scope, int sessionId) async {
+    final batch = _db.batch();
+    batch.delete(tableSession, where: 'scope = ? AND session_id = ?', whereArgs: [scope, sessionId]);
+    batch.delete(tableMessage, where: 'scope = ? AND session_id = ?', whereArgs: [scope, sessionId]);
+    batch.delete(tableSync, where: 'scope = ? AND session_id = ?', whereArgs: [scope, sessionId]);
+    await batch.commit(noResult: true);
+  }
+
   Future<void> clearScope(String scope) async {
     final batch = _db.batch();
     for (final table in [tableMessage, tableSession, tableSync]) {

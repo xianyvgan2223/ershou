@@ -16,8 +16,12 @@ public class AdminPointVO {
     /** 1=官方 2=用户提交 */
     private Integer source;
     private Integer pointType;
+    /** 自绘底图坐标（像素） */
     private BigDecimal coordX;
     private BigDecimal coordY;
+    /** 第三方地图经纬度；用户提交的点位大多只有经纬度，没有像素坐标 */
+    private BigDecimal lng;
+    private BigDecimal lat;
     private Integer safetyScore;
     private List<String> safeTags;
     private String guideText;

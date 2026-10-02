@@ -6,9 +6,11 @@ import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
+import com.ershou.campus.module.item.service.ItemService;
 import com.ershou.campus.module.map.service.TradePointService;
 import com.ershou.campus.module.order.entity.MeetupOrder;
 import com.ershou.campus.module.order.mapper.MeetupOrderMapper;
+import com.ershou.campus.module.order.service.OrderService;
 import com.ershou.campus.module.search.service.ItemIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +37,16 @@ public class ScheduledTasks {
     private final TradePointService tradePointService;
     private final StringRedisTemplate redis;
     private final CacheEvictor evictor;
+    /** 商品到期下架时，顺手收掉挂在该商品上的约面交单 */
+    private final OrderService orderService;
+    /** 取「商品可挂几天」用于文案（ershou.item.valid-days） */
+    private final ItemService itemService;
+
+    /**
+     * 到期要下架的商品状态：还想卖、但还没卖成的都算。
+     * 4 已售出留成交记录、5/7/8 已是终态，都不在列。
+     */
+    private static final List<Integer> EXPIRABLE_ITEM_STATUS = List.of(1, 2, 3, 6);
 
     /**
      * 每分钟：释放超时的锁库，让商品回到在售。
@@ -99,28 +111,50 @@ public class ScheduledTasks {
         }
     }
 
-    /** 每天 03:00：商品有效期到期自动过期 */
-    @Scheduled(cron = "0 0 3 * * ?")
+    /**
+     * 每小时：商品有效期到期自动下架（默认 7 天，`ershou.item.valid-days` 可配）。
+     *
+     * <p>口径「未售出就下架」：只要还没成交（status≠4），到期一律置为 7 已过期，
+     * 覆盖 1 审核中 / 2 在售 / 3 已锁定 / 6 审核未通过 —— 都是"还想卖但没卖成"的状态。
+     * 4 已售出要留成交记录、5/7/8 已经是终态，都不动。
+     *
+     * <p>商品下架后挂在上面的约面交单必须一起作废（复用 {@code closeActiveOrders}），
+     * 否则买家那边会留一张永远等不到见面的「待面交」单和一个永不消失的红点；
+     * 其中 3 已锁定的最典型 —— 锁只在 status=3 时才释放，商品一变 7 就永远等不到。
+     *
+     * <p>跑成每小时而不是每天 03:00：7 天是硬规则，每天只跑一次最多会多挂一整天。
+     */
+    @Scheduled(cron = "${ershou.item.expire-cron:0 30 * * * ?}")
     @Transactional(rollbackFor = Exception.class)
     public void expireItems() {
         List<Item> expired = itemMapper.selectList(Wrappers.<Item>lambdaQuery()
-                .eq(Item::getStatus, 2)
+                .in(Item::getStatus, EXPIRABLE_ITEM_STATUS)
                 .isNotNull(Item::getExpireAt)
                 .lt(Item::getExpireAt, LocalDateTime.now())
                 .select(Item::getId));
+        if (expired.isEmpty()) {
+            return;
+        }
         List<Long> expiredIds = new ArrayList<>(expired.size());
+        int closedOrders = 0;
         for (Item item : expired) {
             Item update = new Item();
             update.setId(item.getId());
             update.setStatus(7);
-            itemMapper.updateById(update);
+            // 条件更新兜并发（卖家刚好在这时候重新上架/下架都不该被覆盖）
+            int rows = itemMapper.update(update, Wrappers.<Item>lambdaUpdate()
+                    .eq(Item::getId, item.getId())
+                    .in(Item::getStatus, EXPIRABLE_ITEM_STATUS));
+            if (rows == 0) {
+                continue;
+            }
             expiredIds.add(item.getId());
+            closedOrders += orderService.closeActiveOrders(item.getId(),
+                    "商品已到 " + itemService.getValidDays() + " 天有效期自动下架，本次约面交自动作废");
         }
         TxHooks.afterCommit(() -> itemIndexService.syncByIds(expiredIds));
         TxHooks.afterCommit(() -> evictor.itemsChanged(expiredIds));
-        if (!expired.isEmpty()) {
-            log.info("[task][expire-item] {} 件商品过期", expired.size());
-        }
+        log.info("[task][expire-item] {} 件商品过期自动下架，同时作废 {} 张挂单", expiredIds.size(), closedOrders);
     }
 
     /**

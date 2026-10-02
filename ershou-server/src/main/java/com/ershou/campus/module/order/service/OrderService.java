@@ -58,6 +58,16 @@ public class OrderService {
     private final OrderStateRecorder orderStateRecorder;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** 面交单状态：1 待卖家确认 / 2 待面交 / 3 已完成 / 4 已拒绝 / 5 已取消 */
+    public static final int STATUS_PENDING = 1;
+    public static final int STATUS_WAITING = 2;
+    public static final int STATUS_DONE = 3;
+    public static final int STATUS_REJECTED = 4;
+    public static final int STATUS_CANCELLED = 5;
+    /** 「进行中」= 还没落定的那两种，防重、待办统计都用它 */
+    public static final List<Integer> STATUS_ACTIVE = List.of(STATUS_PENDING, STATUS_WAITING);
+
     /** 卖家接受后商品锁定到"时间窗结束 + 2 小时"；没填时间窗就锁 24 小时 */
     private static final int LOCK_BUFFER_HOURS = 2;
     private static final int LOCK_DEFAULT_HOURS = 24;
@@ -68,7 +78,8 @@ public class OrderService {
     /** 购物车合并结算：按卖家分组，每组一张面交单，共享 batchNo */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> checkout(Long buyerId, CheckoutDTO dto) {
-        validateSlot(dto.getTimeSlotStart(), dto.getTimeSlotEnd());
+        // 买家的意向单不含时间窗（由卖家定），所以不校验 dto 里的时间；
+        // 面交点同样忽略买家传的值，按每件商品自己的关联点位来。
         List<CartItem> cartItems = cartService.rawByIds(buyerId, dto.getCartIds());
         if (cartItems.isEmpty()) {
             throw new BizException(ResultCode.PARAM_ERROR, "购物车里没有可结算的商品");
@@ -100,16 +111,19 @@ public class OrderService {
         }
 
         String batchNo = genBatchNo();
-        String pointName = pointName(dto.getPointId());
         List<Map<String, Object>> created = new ArrayList<>();
         List<Long> usedCartIds = new ArrayList<>();
         for (CartItem ci : ok) {
+            // 面交点按**每件商品自己的**关联点位来（购物车可能有多件、各自点位不同），
+            // 时间窗留空 = 待协商（由卖家定）
+            Item item = itemMapper.selectById(ci.getItemId());
+            Long pointId = buyerSidePoint(item);
             MeetupOrder order = doCreate(buyerId, ci.getItemId(), ci.getQuantity(),
-                    dto.getPointId(), dto.getTimeSlotStart(), dto.getTimeSlotEnd(), dto.getRemark(), batchNo);
+                    pointId, null, null, dto.getRemark(), batchNo);
             created.add(orderBrief(order));
             usedCartIds.add(ci.getId());
             // 提交后给卖家发私聊提醒（事务提交后执行，失败不影响下单）
-            TxHooks.afterCommit(() -> notifySeller(order, pointName));
+            TxHooks.afterCommit(() -> notifySeller(order, pointName(pointId)));
         }
         cartService.removeByIds(usedCartIds);
         log.info("[order][checkout][{}] batch={} 生成 {} 张面交单（跳过 {} 件不可面交）",
@@ -147,14 +161,31 @@ public class OrderService {
         return point == null ? null : point.getName();
     }
 
+    /**
+     * 买家提交意向时的面交点与时间窗。
+     *
+     * <p>**买家不决定这两项**（2026-10-01 产品规则）：商品在卖家手上，见面的地点与时间由他定
+     * （卖家在「我的面交 → 我卖出的」里设置），买家想改就在私聊里商量。
+     * 前端已经不填了，但接口可能被直接调用 —— 所以这里在服务端也**忽略**买家传的值：
+     * <ul>
+     *   <li>面交点：默认用**商品自己关联的点位**（卖家发布时选的），比空着更有用；</li>
+     *   <li>时间窗：一律留空 = 待协商，等卖家定。</li>
+     * </ul>
+     */
+    private Long buyerSidePoint(Item item) {
+        return item == null ? null : item.getPreferPointId();
+    }
+
     /** 单品直接约面交 */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> createSingle(Long buyerId, CreateOrderDTO dto) {
-        validateSlot(dto.getTimeSlotStart(), dto.getTimeSlotEnd());
+        // 注意：不调 validateSlot —— 买家传的时间窗会被忽略，不该因为它的格式问题报错
+        Item item = itemMapper.selectById(dto.getItemId());
+        Long pointId = buyerSidePoint(item);
         String batchNo = genBatchNo();
-        String pointName = pointName(dto.getPointId());
+        String pointName = pointName(pointId);
         MeetupOrder order = doCreate(buyerId, dto.getItemId(), dto.getQuantity(),
-                dto.getPointId(), dto.getTimeSlotStart(), dto.getTimeSlotEnd(), dto.getRemark(), batchNo);
+                pointId, null, null, dto.getRemark(), batchNo);
         TxHooks.afterCommit(() -> notifySeller(order, pointName));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("batchNo", batchNo);
@@ -189,6 +220,17 @@ public class OrderService {
         if (Objects.equals(item.getSellerId(), buyerId)) {
             throw new BizException(ResultCode.PARAM_ERROR, "不能约自己发布的商品");
         }
+        // 同一件商品、同一个买家，**同时只能有一张进行中的面交单**（1 待确认 / 2 待面交）。
+        // 以前没这道校验，买家可以反复点「约面交」刷出一堆重复单：
+        // 卖家那边看到 N 条一模一样的申请，接受哪条都别扭。
+        long active = orderMapper.selectCount(Wrappers.<MeetupOrder>lambdaQuery()
+                .eq(MeetupOrder::getBuyerId, buyerId)
+                .eq(MeetupOrder::getItemId, itemId)
+                .in(MeetupOrder::getStatus, STATUS_PENDING, STATUS_WAITING));
+        if (active > 0) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR,
+                    "你已经约过这件商品了，等卖家确认就行（想改细节去私聊）");
+        }
         TradePoint point = pointId == null ? null : tradePointService.getById(pointId);
         if (pointId != null && point == null) {
             throw new BizException(ResultCode.PARAM_ERROR, "面交点不存在");
@@ -208,7 +250,7 @@ public class OrderService {
         order.setPointSnapshot(point == null ? null : snapshot(point));
         order.setTimeSlotStart(StringUtils.hasText(start) ? LocalDateTime.parse(start, FMT) : null);
         order.setTimeSlotEnd(StringUtils.hasText(end) ? LocalDateTime.parse(end, FMT) : null);
-        order.setStatus(1);
+        order.setStatus(STATUS_PENDING);
         order.setRescheduleCount(0);
         order.setRemark(remark);
         orderMapper.insert(order);
@@ -318,7 +360,7 @@ public class OrderService {
         if (!Objects.equals(order.getSellerId(), userId)) {
             throw new BizException(ResultCode.ORDER_NO_PERMISSION, "只有卖家可以确认面交");
         }
-        if (order.getStatus() != 1) {
+        if (order.getStatus() != STATUS_PENDING) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR);
         }
         LocalDateTime now = LocalDateTime.now();
@@ -340,7 +382,7 @@ public class OrderService {
 
         MeetupOrder update = new MeetupOrder();
         update.setId(orderId);
-        update.setStatus(2);
+        update.setStatus(STATUS_WAITING);
         orderMapper.updateById(update);
 
         // 同一件商品的其他"待确认"意向一并作废：商品已经锁定给这一单，别人再等也没用，
@@ -378,12 +420,12 @@ public class OrderService {
         if (!Objects.equals(order.getSellerId(), userId)) {
             throw new BizException(ResultCode.ORDER_NO_PERMISSION);
         }
-        if (order.getStatus() != 1) {
+        if (order.getStatus() != STATUS_PENDING) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR);
         }
         MeetupOrder update = new MeetupOrder();
         update.setId(orderId);
-        update.setStatus(5);
+        update.setStatus(STATUS_CANCELLED);
         update.setCancelBy(userId);
         update.setCancelReason(StringUtils.hasText(reason) ? reason : "卖家拒绝了面交");
         orderMapper.updateById(update);
@@ -400,12 +442,12 @@ public class OrderService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(Long orderId, Long userId, String reason) {
         MeetupOrder order = requireOrder(orderId, userId);
-        if (order.getStatus() != 1 && order.getStatus() != 2) {
+        if (order.getStatus() != STATUS_PENDING && order.getStatus() != STATUS_WAITING) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR);
         }
         MeetupOrder update = new MeetupOrder();
         update.setId(orderId);
-        update.setStatus(4);
+        update.setStatus(STATUS_REJECTED);
         update.setCancelBy(userId);
         update.setCancelReason(StringUtils.hasText(reason) ? reason : "双方协商取消");
         orderMapper.updateById(update);
@@ -419,6 +461,41 @@ public class OrderService {
     }
 
     /**
+     * 商品变得「不可交易」时，把还挂在上面的进行中面交单统一收掉（成交 / 卖家自己下架 / 运营强制下架）。
+     *
+     * <p>以前只有两条路会收别人的单：「卖家接受某一单」和「锁过期定时任务」。商品自己变得
+     * 不可交易时一张都不收，其中最狠的是<b>已锁库的商品被下架</b>：锁只在 {@code status=3}
+     * 时才会被释放（{@code ItemMapper#releaseLock}），商品一旦变成 5（已下架）或 8（违规下架）
+     * 就永远等不到释放，那张「待面交」单会<b>永久卡住</b> —— 买家顶栏红点永远不消，
+     * 而且没有任何定时任务会碰它（锁过期任务只捞 status=3 的商品，48 小时任务只管 status=1）。
+     *
+     * @param reason 买家可见的说明：写进 {@code cancel_reason}，并逐单私聊告知对方
+     * @return 实际作废的张数
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int closeActiveOrders(Long itemId, String reason) {
+        if (itemId == null) {
+            return 0;
+        }
+        // 先查出来是为了提交后能逐个通知到人 —— 只做批量 update 的话就不知道通知谁了
+        List<MeetupOrder> active = orderMapper.selectList(Wrappers.<MeetupOrder>lambdaQuery()
+                .eq(MeetupOrder::getItemId, itemId)
+                .in(MeetupOrder::getStatus, STATUS_ACTIVE));
+        if (active.isEmpty()) {
+            return 0;
+        }
+        int rows = orderMapper.update(null, Wrappers.<MeetupOrder>lambdaUpdate()
+                .eq(MeetupOrder::getItemId, itemId)
+                .in(MeetupOrder::getStatus, STATUS_ACTIVE)
+                .set(MeetupOrder::getStatus, STATUS_CANCELLED)
+                .set(MeetupOrder::getCancelReason, reason));
+        TxHooks.afterCommit(() -> active.forEach(o ->
+                notifyPeer(o, o.getSellerId(), "【约面交】《" + o.getItemTitle() + "》" + reason)));
+        log.info("[order][close-active][item={}] 作废 {} 张进行中的面交单：{}", itemId, rows, reason);
+        return rows;
+    }
+
+    /**
      * 确认成交。
      *
      * <p>卖家点一次即完成（线下钱货两清由卖家判断）：商品置已售出 + 双方信用分 +2。
@@ -429,7 +506,7 @@ public class OrderService {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> confirm(Long orderId, Long userId) {
         MeetupOrder order = requireOrder(orderId, userId);
-        if (order.getStatus() != 2) {
+        if (order.getStatus() != STATUS_WAITING) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前状态不能确认成交");
         }
         LocalDateTime now = LocalDateTime.now();
@@ -450,18 +527,21 @@ public class OrderService {
         }
         MeetupOrder update = new MeetupOrder();
         update.setId(orderId);
-        update.setStatus(3);
+        update.setStatus(STATUS_DONE);
         update.setSellerConfirmAt(now);
         orderMapper.updateById(update);
 
         itemMapper.markSold(order.getItemId());
+        // 商品已卖出：这件商品上还挂着的其他意向 / 待面交单一起作废（本单此时已是 3，不会被误伤）
+        int closed = closeActiveOrders(order.getItemId(), "商品已卖给其他同学，本次约面交自动作废");
         TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
         TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
         userMapper.addCredit(order.getBuyerId(), 2);
         userMapper.addCredit(order.getSellerId(), 2);
         TxHooks.afterCommit(() -> notifyPeer(order, userId,
                 "【交易完成】《" + order.getItemTitle() + "》已标记卖出，双方信用分 +2，谢谢配合！"));
-        log.info("[order][finished][{}] orderNo={} 交易完成，双方信用分 +2", userId, order.getOrderNo());
+        log.info("[order][finished][{}] orderNo={} 交易完成，双方信用分 +2，同时作废 {} 张挂单",
+                userId, order.getOrderNo(), closed);
         result.put("status", 3);
         result.put("message", "交易已完成，双方信用分 +2");
         return result;
@@ -548,7 +628,7 @@ public class OrderService {
         if (!Objects.equals(order.getSellerId(), userId)) {
             throw new BizException(ResultCode.ORDER_NO_PERMISSION, "只有卖家能修改面交地点和时间");
         }
-        if (order.getStatus() == null || (order.getStatus() != 1 && order.getStatus() != 2)) {
+        if (order.getStatus() == null || (order.getStatus() != STATUS_PENDING && order.getStatus() != STATUS_WAITING)) {
             throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前状态不能改面交地点");
         }
         if (dto == null || dto.getPointId() == null) {
@@ -634,6 +714,7 @@ public class OrderService {
         vo.setStatus(o.getStatus());
         vo.setStatusText(statusText(o.getStatus()));
         vo.setRemark(o.getRemark());
+        vo.setCancelReason(o.getCancelReason());
         vo.setCreatedAt(o.getCreatedAt());
         vo.setVerifiedAt(o.getVerifiedAt());
         vo.setBuyerId(o.getBuyerId());

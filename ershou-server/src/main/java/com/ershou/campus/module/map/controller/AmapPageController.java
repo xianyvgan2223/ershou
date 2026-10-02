@@ -75,6 +75,42 @@ public class AmapPageController {
     @Value("${ershou.amap.web-key:}")
     private String amapWebKey;
 
+    private final org.springframework.core.env.Environment environment;
+
+    /**
+     * 取高德 JS API key，**同时认两种变量名**。
+     *
+     * <p>踩过的坑（2026-10-02 移动端地图打不开）：本项目的 `.env` 里这两个值叫
+     * {@code VITE_AMAP_JS_KEY}（因为 vite 只注入 {@code VITE_} 前缀的变量给浏览器），
+     * 而这里的配置项是 {@code ershou.amap.js-key: ${AMAP_JS_KEY:}} —— 两边**名字不一样**。
+     * 结果：Web 端地图好好的（读的是 {@code VITE_} 那个），移动端却只拿到一句
+     * "后端未配置高德 key，无法显示真地图"，而且是静默降级 —— 不报错、只显示一行灰字。
+     *
+     * <p>配置项本身没错（服务端配置不该依赖前端的命名约定），但**一个 key 要写两遍、
+     * 漏一遍就静默坏一半**这种设计太容易踩。所以这里加一层兜底：
+     * {@code ershou.amap.js-key} 没配时自动回退到同名环境变量 / {@code VITE_} 版本。
+     * 生产环境照旧只配正式变量名即可，回退不会生效。
+     */
+    private String resolveJsKey() {
+        return firstNonBlank(amapJsKey, environment.getProperty("AMAP_JS_KEY"),
+                environment.getProperty("VITE_AMAP_JS_KEY"));
+    }
+
+    /** 安全密钥同理，两种变量名都认 */
+    private String resolveSecurityCode() {
+        return firstNonBlank(amapSecurityCode, environment.getProperty("AMAP_JS_SECURITY_CODE"),
+                environment.getProperty("VITE_AMAP_JS_SECURITY_CODE"));
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
     /**
      * 逆地理编码：把坐标翻成"这里可能叫什么"，返回多个候选。
      *
@@ -161,17 +197,31 @@ public class AmapPageController {
     @Operation(summary = "高德 key 是否已配置（不下发 key 本身）")
     @GetMapping("/amap-status")
     public Result<Map<String, Object>> amapStatus() {
-        boolean ready = StringUtils.hasText(amapJsKey) && StringUtils.hasText(amapSecurityCode);
+        String jsKey = resolveJsKey();
+        String securityCode = resolveSecurityCode();
+        boolean ready = StringUtils.hasText(jsKey) && StringUtils.hasText(securityCode);
         if (!ready) {
             // 这个接口是移动端判断"能不能显示真地图"的唯一依据，配置缺失必须留在日志里，
-            // 否则前端只是退回自绘底图，排查时看不到任何线索
-            log.warn("[amap][status] 高德 key 未配置（或只配了一半）：js-key={} 字符, security-code={} 字符",
-                    amapJsKey == null ? 0 : amapJsKey.length(),
-                    amapSecurityCode == null ? 0 : amapSecurityCode.length());
+            // 否则前端只是退回自绘底图，排查时看不到任何线索。
+            //
+            // 注意（2026-10-02 定案）：.env 现在由 DotenvEnvironmentPostProcessor 在**应用启动时
+            // 自动加载**，与"用哪个入口启动"无关（脚本 / IDEA / jar 都一样）。
+            // 所以看到这条日志只可能是两种原因：① .env 里确实没配；② 后端的工作目录不是
+            // ershou-server（那样就找不到 ../.env）。
+            log.warn("[amap][status] 高德 key 未配置（或只配了一半）：js-key={} 字符, security-code={} 字符；"
+                            + "请在项目根目录的 .env 里配 AMAP_JS_KEY / AMAP_JS_SECURITY_CODE"
+                            + "（后端启动时会自动读取；若仍为空，请确认后端的工作目录是 ershou-server）",
+                    jsKey.length(), securityCode.length());
         }
-        return Result.ok(Map.of(
-                "configured", ready,
-                "hint", ready ? "高德地图可用" : "后端未配置 ershou.amap.js-key，移动端将退回自绘底图"));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("configured", ready);
+        data.put("hint", ready ? "高德地图可用"
+                : "后端未配置高德 key：请在项目根目录 .env 里补 AMAP_JS_KEY / AMAP_JS_SECURITY_CODE"
+                        + "（后端会自动读取，无需每次重启都配），移动端将退回自绘底图");
+        // 排查"App 到底能不能显示真地图"时，这两个开关是关键信息，但都不能下发 key 本身
+        data.put("jsKeyLength", jsKey.length());
+        data.put("securityCodeLength", securityCode.length());
+        return Result.ok(data);
     }
 
     /**
@@ -187,7 +237,9 @@ public class AmapPageController {
                                            @RequestParam(required = false) Long focusPointId,
                                            @RequestParam(defaultValue = "false") boolean wantRegeo,
                                            @RequestParam(required = false) String mapPoints) {
-        if (!StringUtils.hasText(amapJsKey)) {
+        String jsKey = resolveJsKey();
+        if (!StringUtils.hasText(jsKey)) {
+            log.warn("[amap][html] 未配置高德 key，向 App 下发降级页（移动端地图会显示不了）");
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_HTML)
                     .body("<html><body style='font:14px system-ui;padding:24px;color:#666'>"
@@ -476,8 +528,8 @@ public class AmapPageController {
                 </html>
                 """;
         return page
-                .replace("%SECURITY_CODE%", jsonSafe(amapSecurityCode))
-                .replace("%JS_KEY%", jsonSafe(amapJsKey))
+                .replace("%SECURITY_CODE%", jsonSafe(resolveSecurityCode()))
+                .replace("%JS_KEY%", jsonSafe(resolveJsKey()))
                 .replace("%CAMPUS_ID%", String.valueOf(campusId))
                 .replace("%FOCUS_POINT_ID%", String.valueOf(focusPointId == null ? 0L : focusPointId))
                 .replace("%WANT_REGEO%", String.valueOf(wantRegeo))

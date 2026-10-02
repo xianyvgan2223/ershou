@@ -95,6 +95,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '我的', requiresAuth: true },
       },
       {
+        path: 'blocked',
+        name: 'blocked',
+        component: () => import('@/views/ProfileBlockView.vue'),
+        meta: { title: '我的黑名单', requiresAuth: true },
+      },
+      {
         path: 'admin',
         component: () => import('@/views/admin/AdminShell.vue'),
         meta: { title: '运营后台', requiresAuth: true, requiresAdmin: true },
@@ -112,10 +118,23 @@ const routes: RouteRecordRaw[] = [
             meta: { title: '审核工作台', requiresAuth: true, requiresAdmin: true },
           },
           {
+            // 上架审核：实时接收新上架/改名的商品，逐条确认（与审核工作台是两条队列）
+            path: 'review',
+            name: 'admin-review',
+            component: () => import('@/views/admin/AdminReviewView.vue'),
+            meta: { title: '上架审核', requiresAuth: true, requiresAdmin: true },
+          },
+          {
             path: 'items',
             name: 'admin-items',
             component: () => import('@/views/admin/AdminItemsView.vue'),
             meta: { title: '商品管理', requiresAuth: true, requiresAdmin: true },
+          },
+          {
+            path: 'orders',
+            name: 'admin-orders',
+            component: () => import('@/views/admin/AdminOrdersView.vue'),
+            meta: { title: '面交单管理', requiresAuth: true, requiresAdmin: true },
           },
           {
             path: 'users',

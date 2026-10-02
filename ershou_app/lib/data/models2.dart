@@ -169,6 +169,7 @@ class MapPoint {
     this.safetyScore = 0,
     this.safeTags = const [],
     this.itemCount = 0,
+    this.onSaleCount = 0,
     this.minPrice = 0,
     this.guideText = '',
     this.source,
@@ -185,7 +186,11 @@ class MapPoint {
   final double? lat;
   final int safetyScore;
   final List<String> safeTags;
+  /// 「还有戏」的商品数（草稿/审核中/在售/已锁定）—— 气泡与商家视角用它
   final int itemCount;
+
+  /// 买家真的看得到的在售件数（不含审核中的）—— 「点开能看到几件」用它
+  final int onSaleCount;
   final double minPrice;
   final String guideText;
   /// 来源：1=官方 2=用户提交 3=高德搜索落库
@@ -235,6 +240,7 @@ class MapPoint {
             .map((e) => _str(e))
             .toList(),
         itemCount: _intOf(j['itemCount']),
+      onSaleCount: _intOf(j['onSaleCount']),
         minPrice: _num(j['minPrice']),
         guideText: _str(j['guideText']),
         source: _intOrNull(j['source']),
@@ -365,6 +371,7 @@ class MeetupOrder {
     this.sellerId = 0,
     this.sellerName = '',
     this.remark = '',
+    this.cancelReason = '',
     this.createdAt = '',
   });
 
@@ -386,6 +393,10 @@ class MeetupOrder {
   final int sellerId;
   final String sellerName;
   final String remark;
+
+  /// 取消 / 失效原因：商品被卖给别人、被下架导致自动作废时，卡片上直接说明原因，
+  /// 否则买家只看得到一个「已失效」。
+  final String cancelReason;
   final String createdAt;
 
   factory MeetupOrder.fromJson(Map<String, dynamic> j) => MeetupOrder(
@@ -407,6 +418,7 @@ class MeetupOrder {
         sellerId: _intOf(j['sellerId']),
         sellerName: _str(j['sellerName']),
         remark: _str(j['remark']),
+        cancelReason: _str(j['cancelReason']),
         createdAt: _str(j['createdAt']),
       );
 }

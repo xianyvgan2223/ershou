@@ -2,9 +2,9 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { ChatDotRound, MoreFilled, Picture, Promotion, View } from '@element-plus/icons-vue'
+import { WarningFilled, ChatDotRound, MoreFilled, Picture, Promotion, View } from '@element-plus/icons-vue'
 import { fetchChatSession, fetchQuickReplies } from '@/api/chat'
-import type { ChatMessageVO } from '@/api/chat'
+import type { ChatMessageVO, ChatSessionVO } from '@/api/chat'
 import { blockUser, unblockUser } from '@/api/user'
 import {
   acceptMeetupOrder,
@@ -21,7 +21,7 @@ import PointPickerDialog from '@/components/PointPickerDialog.vue'
 import { useChatStore } from '@/stores/chat'
 import { useMeetupStore } from '@/stores/meetup'
 import { uploadFile } from '@/api/file'
-import { formatDateTime, formatPrice, formatRelativeTime, nameInitial, orderStatusTagType } from '@/utils/format'
+import { formatDateTime, formatPrice, formatRelativeTime, nameInitial, orderStatusTagTypeByCode } from '@/utils/format'
 import { showTip } from '@/utils/feedback'
 
 const route = useRoute()
@@ -208,6 +208,98 @@ async function openSession(id: number): Promise<void> {
   void loadActiveOrder()
 }
 
+/**
+ * 删除聊天记录（会话列表项右侧「⋯」菜单）。
+ *
+ * 只删自己这一侧：对方列表与消息记录都不受影响；对方再发消息时会话会重新出现。
+ * 删除后聊天窗若正开着这条会话会被清空（store 里一并处理），所以这里补一句提示。
+ */
+async function deleteOne(item: ChatSessionVO): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `删除与「${item.peerName || '同学'}」的聊天记录？\n\n` +
+        '只删除你这一侧的记录，对方不受影响；对方再发消息时会话会重新出现。',
+      '删除聊天',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  try {
+    await chat.deleteSession(item.id)
+    showTip('已删除聊天记录', 'success')
+  } catch {
+    // 响应拦截器已提示
+  }
+}
+
+/* ---------------- 多选批量删除 ---------------- */
+
+const selecting = ref(false)
+const selectedIds = ref<number[]>([])
+const batchDeleting = ref(false)
+
+const allSelected = computed(
+  () => chat.sessions.length > 0 && selectedIds.value.length === chat.sessions.length,
+)
+const someSelected = computed(() => selectedIds.value.length > 0)
+
+function enterSelection(): void {
+  selecting.value = true
+  selectedIds.value = []
+}
+
+function exitSelection(): void {
+  selecting.value = false
+  selectedIds.value = []
+}
+
+function toggleSelectOne(id: number): void {
+  selectedIds.value = selectedIds.value.includes(id)
+    ? selectedIds.value.filter((x) => x !== id)
+    : [...selectedIds.value, id]
+}
+
+function toggleSelectAll(next: boolean): void {
+  selectedIds.value = next ? chat.sessions.map((s) => s.id) : []
+}
+
+/** 批量删除：失败的那几条要留在列表里，并如实告诉用户哪几条没删掉 */
+async function deleteSelected(): Promise<void> {
+  // 防重入：确认框弹出期间按钮仍可点（loading 要等确认后才置位），连点会叠出
+  // 多个确认框并重复发请求 —— 用户看到的就是"点了没反应 / 删不掉"。
+  if (batchDeleting.value) return
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  batchDeleting.value = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `删除选中的 ${ids.length} 个会话？\n\n` +
+          '只删除你这一侧的记录，对方不受影响；对方再发消息时会话会重新出现。',
+        '删除聊天',
+        { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+      )
+    } catch {
+      return // 用户取消：finally 里放开 loading
+    }
+    const result = await chat.deleteSessions(ids)
+    if (result.failures.length) {
+      // 用弹窗而不是 toast：失败原因可能有好几条，toast 塞不下也来不及看
+      ElMessageBox.alert(result.failures.join('\n'), `已删除 ${result.success} 个，${result.failures.length} 个没删掉`, {
+        confirmButtonText: '知道了',
+      }).catch(() => undefined)
+    } else {
+      showTip(`已删除 ${result.success} 个会话`, 'success')
+    }
+    exitSelection()
+  } catch {
+    // 响应拦截器已提示；列表保持原样
+  } finally {
+    batchDeleting.value = false
+  }
+}
+
 async function loadMore(): Promise<void> {
   if (currentId.value === null) return
   loadingMore.value = true
@@ -304,7 +396,14 @@ function showWho(index: number): boolean {
 
 function canRecall(msg: ChatMessageVO): boolean {
   if (!msg.mine || msg.id <= 0 || msg.localStatus) return false
-  const time = new Date(msg.createdAt.replace(' ', 'T')).getTime()
+  // ⚠️ createdAt 运行时可能是 undefined（乐观消息 / 字段缺失的帧）。
+  // 这里以前直接 `msg.createdAt.replace(...)`，一旦命中就在**模板渲染里抛错** ——
+  // 后果不只是这条不显示：整棵子树的更新都会中断，表现是
+  // "按 Enter 后消息没发出去、输入框不清空、发送按钮永久 loading 锁死"。
+  // 渲染路径上的取值一律要能兜底，一条坏数据不能把整个页面带走。
+  const raw = msg.createdAt
+  if (typeof raw !== 'string' || !raw) return false
+  const time = new Date(raw.replace(' ', 'T')).getTime()
   return Number.isFinite(time) && Date.now() - time < RECALL_WINDOW_MS
 }
 
@@ -362,10 +461,48 @@ onMounted(async () => {
     <!-- 左：会话列表 -->
     <aside class="chat__list">
       <header class="chat__list-head">
-        <h2>消息</h2>
-        <span class="chat__conn" :class="{ 'is-on': chat.connected }">
-          {{ chat.connected ? '实时连接中' : '连接中断，重连中…' }}
-        </span>
+        <template v-if="!selecting">
+          <h2>消息</h2>
+          <span class="chat__conn" :class="{ 'is-on': chat.connected }">
+            {{ chat.connected ? '实时连接中' : '连接中断，重连中…' }}
+          </span>
+          <!-- 黑名单入口放这里的原因：拉黑是在聊天里发生的，用户想"我拉黑过谁/怎么解除"
+               第一反应就是回消息页找；个人中心里也有一个入口。 -->
+          <el-button text size="small" class="chat__multi-btn" @click="router.push('/blocked')">
+            黑名单
+          </el-button>
+          <el-button
+            v-if="chat.sessions.length > 1"
+            text
+            size="small"
+            class="chat__multi-btn"
+            @click="enterSelection"
+          >
+            多选
+          </el-button>
+        </template>
+        <!-- 多选模式的头部：全选 / 已选 N 条 / 删除 / 退出 -->
+        <template v-else>
+          <el-checkbox
+            :model-value="allSelected"
+            :indeterminate="someSelected && !allSelected"
+            @change="(v: any) => toggleSelectAll(!!v)"
+          >
+            全选
+          </el-checkbox>
+          <span class="chat__multi-count">已选 {{ selectedIds.length }} 条</span>
+          <el-button
+            text
+            size="small"
+            type="danger"
+            :disabled="!selectedIds.length"
+            :loading="batchDeleting"
+            @click="deleteSelected"
+          >
+            删除
+          </el-button>
+          <el-button text size="small" @click="exitSelection">取消</el-button>
+        </template>
       </header>
 
       <div v-if="chat.loadingSessions && !chat.sessions.length" class="chat__list-empty">加载中…</div>
@@ -380,9 +517,18 @@ onMounted(async () => {
           v-for="item in chat.sessions"
           :key="item.id"
           class="session"
-          :class="{ 'is-active': item.id === currentId }"
-          @click="openSession(item.id)"
+          :class="{ 'is-active': item.id === currentId, 'is-checked': selectedIds.includes(item.id) }"
+          :data-session-id="item.id"
+          @click="selecting ? toggleSelectOne(item.id) : openSession(item.id)"
         >
+          <!-- 多选模式：显示勾选框；整行也可点，勾选框只是视觉提示 -->
+          <el-checkbox
+            v-if="selecting"
+            :model-value="selectedIds.includes(item.id)"
+            class="session__check"
+            @click.stop
+            @change="() => toggleSelectOne(item.id)"
+          />
           <el-avatar :size="40" :src="item.peerAvatar || undefined">
             {{ nameInitial(item.peerName) }}
           </el-avatar>
@@ -410,6 +556,15 @@ onMounted(async () => {
               <span v-if="item.blockedByMe || item.blockedByPeer" class="session__blocked">· 已拉黑</span>
             </p>
           </div>
+          <!-- 删除聊天记录：@click.stop 必须加，否则点菜单会连带触发整行的 openSession -->
+          <el-dropdown v-if="!selecting" trigger="click" class="session__more" @click.stop>
+            <span class="session__more-btn" title="更多"><el-icon><MoreFilled /></el-icon></span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="deleteOne(item)">删除聊天</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </li>
       </ul>
     </aside>
@@ -482,10 +637,19 @@ onMounted(async () => {
           </div>
         </header>
 
+        <!-- 实时连接状态：会话列表抬头也有一份，但窄屏（手机）只显示聊天窗，
+             正文区看不到那条 —— 于是在这里再放一条。
+             断线是**静默**的：消息不再自动出现，用户只能靠"刷新才看到"察觉。
+             明确告诉他"现在不实时，会自动重连"，比让他反复刷新强。 -->
+        <div v-if="!chat.connected" class="chat__offline">
+          <el-icon><WarningFilled /></el-icon>
+          <span>实时连接已断开，消息不会自动刷新（正在重连…）。这段时间的消息可以下拉刷新补齐。</span>
+        </div>
+
         <!-- 交易状态卡片：卖家收到申请能直接在这里锁定商品，买家也能看到进展 -->
         <div v-if="activeOrder" class="trade" v-loading="orderLoading">
           <div class="trade__head">
-            <el-tag :type="orderStatusTagType(activeOrder.statusText)" size="small" effect="dark">
+            <el-tag :type="orderStatusTagTypeByCode(activeOrder.status)" size="small" effect="dark">
               {{ activeOrder.statusText }}
             </el-tag>
             <span class="trade__meta">
@@ -710,6 +874,7 @@ onMounted(async () => {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
+    gap: 6px;
     padding: 14px 16px 10px;
 
     h2 {
@@ -717,6 +882,30 @@ onMounted(async () => {
       color: var(--text-1);
       font-size: 16px;
     }
+
+    // 多选模式头部：复选框别被 flex 压扁
+    .el-checkbox {
+      height: auto;
+      margin-right: 0;
+    }
+  }
+
+  // 「多选」入口：平时低调（它是破坏性操作的入口），hover 才明显
+  &__multi-btn {
+    margin-left: auto;
+    color: var(--text-3);
+    font-size: 12px;
+
+    &:hover {
+      color: var(--brand-600);
+    }
+  }
+
+  &__multi-count {
+    margin-left: auto;
+    color: var(--text-2);
+    font-size: 12px;
+    white-space: nowrap;
   }
 
   &__conn {
@@ -766,6 +955,18 @@ onMounted(async () => {
     display: flex;
     overflow: hidden;
     flex-direction: column;
+  }
+
+  &__offline {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 14px;
+    background: #fff7e6;
+    border-bottom: 1px solid #ffe1a8;
+    color: #b45309;
+    font-size: 12.5px;
+    line-height: 1.5;
   }
 
   &__head {
@@ -963,10 +1164,52 @@ onMounted(async () => {
 
   &:hover {
     background: var(--surface-2);
+
+    // 删除入口平时藏起来，鼠标悬停才出现：删除是破坏性操作，不该一直摊在列表上误触
+    .session__more {
+      opacity: 1;
+    }
   }
 
   &.is-active {
     background: var(--brand-50);
+  }
+
+  // 多选模式下已勾选的行：底色标出来，一眼看清选了哪些
+  &.is-checked {
+    background: var(--brand-50);
+  }
+
+  // 多选勾选框：垂直居中于整行
+  &__check {
+    display: flex;
+    align-self: center;
+    height: auto;
+    margin-right: 0;
+  }
+
+  // 「⋯」删除菜单（hover 才显示）
+  &__more {
+    display: flex;
+    align-self: center;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  &__more-btn {
+    display: flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    color: var(--text-3);
+
+    &:hover {
+      background: var(--line);
+      color: var(--text-1);
+    }
   }
 
   &__body {
@@ -1205,6 +1448,7 @@ onMounted(async () => {
   border: 1px solid var(--brand-100);
   border-radius: var(--r-md);
   background: var(--brand-50);
+
 
   &__head {
     display: flex;

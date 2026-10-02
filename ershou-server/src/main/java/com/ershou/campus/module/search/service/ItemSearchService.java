@@ -38,9 +38,18 @@ public class ItemSearchService {
     private final SearchProperties props;
     private final ObjectMapper json;
 
-    /** 是否走 ES：开关打开 + 有关键词 + ES 健康 */
+    /**
+     * 是否走 ES：开关打开 + 有关键词 + ES 健康 + **没有按点位筛选**。
+     *
+     * <p>为什么要排掉 preferPointId：ES 索引文档（ItemDocument）里**没有这个字段**，
+     * 硬走 ES 会把这个过滤条件丢掉（返回该点位之外的商品，属于静默错误）。
+     * 点位查询本来就只有几条、走 MySQL 精确又便宜，没必要为了它改索引映射。
+     */
     public boolean supports(ItemQueryDTO query) {
-        return props.isEnabled() && StringUtils.hasText(query.getKeyword()) && es.healthy();
+        return props.isEnabled()
+                && StringUtils.hasText(query.getKeyword())
+                && query.getPreferPointId() == null
+                && es.healthy();
     }
 
     public void markFailure(Exception e) {
@@ -93,6 +102,10 @@ public class ItemSearchService {
     /** 拼检索 DSL：status=2 恒定过滤 + 关键词 multi_match + 类目/校区/卖家过滤 + 排序 + 高亮 */
     private String queryJson(ItemQueryDTO query, int from, int size) {
         List<String> filters = new ArrayList<>();
+        // ⚠️ status=2 这个过滤**必须同时进 DSL**，不能只在回库后筛。
+        // 曾经只有回库筛（ItemService.searchViaEs 里那段），结果：
+        // ES 的 total 把已下架/已售出的也算进去，而实际返回的 records 被筛掉 →
+        // 用户看到"共 12 件"却一件都列不出来（搜「自行车」实测复现）。
         filters.add("{\"term\":{\"status\":2}}");
         if (query.getCategoryId() != null) {
             filters.add("{\"term\":{\"categoryId\":" + query.getCategoryId() + "}}");

@@ -1,5 +1,7 @@
 package com.ershou.campus.module.admin.service;
 
+import com.ershou.campus.common.cache.CacheEvictor;
+import com.ershou.campus.common.util.TxHooks;
 import com.ershou.campus.module.admin.entity.SysAuditLog;
 import com.ershou.campus.module.admin.mapper.SysAuditLogMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +16,9 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 /**
  * 运营操作审计：所有后台写操作都落一条 sys_audit_log。
  * 审计失败只告警、不影响主流程。
+ *
+ * <p>这里同时充当后台写操作的统一出口：概览统计（30 秒缓存）在每次写操作后删掉，
+ * 免得运营审核完商品后侧栏待办角标还要等缓存过期。
  */
 @Slf4j
 @Service
@@ -21,6 +26,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class AuditLogService {
 
     private final SysAuditLogMapper auditLogMapper;
+    private final CacheEvictor cacheEvictor;
     private final ObjectMapper json;
 
     public void record(Long operatorId, String module, String action,
@@ -36,6 +42,10 @@ public class AuditLogService {
             entity.setAfterValue(toJson(after));
             entity.setIp(currentIp());
             auditLogMapper.insert(entity);
+            // 写操作已落库，工作台待办数字就变了：删缓存让它下次重算（失败只记日志）。
+            // 必须等事务提交后再删 —— record() 几乎都在 @Transactional 方法里被调用，
+            // 提前删会被并发读用旧值回填，缓存反而更脏（见 CacheEvictor 的类注释）。
+            TxHooks.afterCommit(cacheEvictor::adminDashboard);
         } catch (Exception e) {
             log.warn("[audit-log] 写入失败 module={} action={} target={}#{}：{}",
                     module, action, targetType, targetId, e.getMessage());

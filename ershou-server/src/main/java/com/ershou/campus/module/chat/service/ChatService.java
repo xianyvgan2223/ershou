@@ -6,6 +6,7 @@ import com.ershou.campus.common.exception.BizException;
 import com.ershou.campus.common.result.ResultCode;
 import com.ershou.campus.common.util.ContentCipher;
 import com.ershou.campus.common.util.RedisKeys;
+import com.ershou.campus.module.admin.vo.BatchAuditResultVO;
 import com.ershou.campus.module.ai.AuditDecision;
 import com.ershou.campus.module.ai.AuditResult;
 import com.ershou.campus.module.ai.ContentAuditService;
@@ -102,6 +103,8 @@ public class ChatService {
             created.setUnreadB(0);
             created.setRiskLevel(RISK_NONE);
             created.setStatus(1);
+            created.setDeletedA(0);
+            created.setDeletedB(0);
             // 新会话排到列表最前面
             created.setLastMsgAt(LocalDateTime.now());
             try {
@@ -114,19 +117,112 @@ public class ChatService {
                     throw new BizException(ResultCode.SYSTEM_ERROR, "会话创建失败，请重试");
                 }
             }
+        } else if (session.deletedFor(userId)) {
+            // 之前删过这个会话，现在又主动从商品页点进来 —— 视为"重新开启"，撤销删除。
+            // 不撤销的话会出现最困惑的一种情况：点了私聊、消息也发出去了，
+            // 但回列表一看会话不见了（因为还带着删除标记）。
+            sessionMapper.restoreDeleted(session.getId());
+            log.info("[chat][open][{}][{}] 重新开启已删除的会话", userId, session.getId());
+            session = sessionMapper.selectById(session.getId());
         }
         return toSessionVO(session, userId, Map.of(itemId, item), peerMap(sellerId),
                 blockService.blockedUserIds(userId), blockService.blockerIds(userId));
     }
 
-    /** 我的会话列表：按最后消息时间倒序，带对方信息、商品卡片、未读数 */
+    /**
+     * 删除聊天记录（会话）。
+     *
+     * <p><b>每用户软删除</b>：一条会话是两个人共用的，直接删整行会把对方的会话、
+     * 对方的历史消息入口一起删掉 —— 那是别人的数据，不该被我的一次点击带走。
+     * 所以只标记"我这一侧删了"：
+     * <ul>
+     *   <li>我的列表与未读汇总里不再出现它（红点一起归零，否则会出现"列表没有、
+     *       角标还在"的消不掉红点）；</li>
+     *   <li>对方的会话列表不受任何影响；</li>
+     *   <li>对方再发消息时自动恢复（见 {@link #send}）—— 与微信一致：删了聊天，
+     *       对方再发消息，会话重新出现。</li>
+     * </ul>
+     *
+     * <p>消息记录本身不删（对方还要看），所以这里没有物理删除任何一行。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteSession(Long userId, Long sessionId) {
+        ChatSession session = requireMember(sessionId, userId);
+        boolean sinceA = Objects.equals(session.getUserA(), userId);
+        if (session.deletedFor(userId)) {
+            // 幂等：重复点删除不报错（前端连点、或两端同时删）
+            log.debug("[chat][delete][{}][{}] 已是删除状态，忽略", userId, sessionId);
+            return;
+        }
+        sessionMapper.markDeleted(sessionId, sinceA);
+        // 未读快照一起清：DB 已经归零，Redis 里留着就会算进顶栏红点
+        try {
+            redis.opsForHash().delete(RedisKeys.chatUnread(userId), String.valueOf(sessionId));
+        } catch (Exception e) {
+            log.warn("[chat][delete][{}] 清理 Redis 未读快照失败：{}", userId, e.getMessage());
+        }
+        log.info("[chat][delete][{}][{}] 已从本人列表删除会话（对方不受影响）", userId, sessionId);
+    }
+
+    /**
+     * 批量删除聊天记录（会话列表的"多选删除"）。
+     *
+     * <p>逐条独立处理，**不因单条失败整批回滚**（与审核工作台的批量处置同口径）：
+     * 勾了 20 条、其中 1 条已被对方删了或本来就不属于我，不该让另外 19 条白干。
+     * 返回成功/失败数与每条失败的原因，前端据此提示"这几条没删掉"。
+     *
+     * <p>为什么不做成"循环调单个接口"：20 条就是 20 次往返，手机上体感明显；
+     * 而且中途失败会留下"删了一半"的脏状态，前端也没法告诉用户哪几条没成功。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public BatchAuditResultVO batchDelete(Long userId, List<Long> rawIds) {
+        List<Long> ids = rawIds == null ? List.of() : rawIds.stream()
+                .filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            throw new BizException(ResultCode.PARAM_ERROR, "请先勾选要删除的会话");
+        }
+        int success = 0;
+        List<BatchAuditResultVO.Failure> failures = new ArrayList<>();
+        for (Long sessionId : ids) {
+            try {
+                deleteSession(userId, sessionId);
+                success++;
+            } catch (BizException e) {
+                // 不是我的会话（70002）/ 不存在：如实回报，并在该行里说明原因
+                failures.add(new BatchAuditResultVO.Failure(sessionId, e.getMessage()));
+            } catch (Exception e) {
+                log.warn("[chat][batch-delete][{}][{}] 删除失败：{}", userId, sessionId, e.getMessage());
+                failures.add(new BatchAuditResultVO.Failure(sessionId, "删除失败：" + e.getMessage()));
+            }
+        }
+        log.info("[chat][batch-delete][{}] success={} failed={}", userId, success, failures.size());
+        return new BatchAuditResultVO(success, failures.size(), failures);
+    }
+
+    /**
+     * 我的会话列表：按最后消息时间倒序，带对方信息、商品卡片、未读数。
+     *
+     * <p>{@code includeDeleted=false}（默认）时**剔除我删过的会话** —— 删除聊天记录
+     * 的意义就是"它从我的列表里消失"。但消息本身与对方的会话都还在，
+     * 对方再发消息时这条会自己回来。
+     */
     public List<ChatSessionVO> listSessions(Long userId) {
+        return listSessions(userId, false);
+    }
+
+    public List<ChatSessionVO> listSessions(Long userId, boolean includeDeleted) {
         List<ChatSession> sessions = sessionMapper.selectList(Wrappers.<ChatSession>lambdaQuery()
                 .and(w -> w.eq(ChatSession::getUserA, userId).or().eq(ChatSession::getUserB, userId))
                 .orderByDesc(ChatSession::getLastMsgAt)
                 .orderByDesc(ChatSession::getId));
         if (sessions.isEmpty()) {
             return List.of();
+        }
+        if (!includeDeleted) {
+            sessions = sessions.stream().filter(s -> !s.deletedFor(userId)).toList();
+            if (sessions.isEmpty()) {
+                return List.of();
+            }
         }
         Set<Long> peerIds = sessions.stream().map(s -> s.peerOf(userId)).filter(Objects::nonNull)
                 .collect(Collectors.toSet());
@@ -178,8 +274,11 @@ public class ChatService {
         Map<String, Integer> bySession = new LinkedHashMap<>();
         // 无论缓存有没有命中，都要查一次"我的会话"——DB 是权威，
         // 而且要用它剔除缓存里的**僵尸会话**（见下）。
+        // 同时剔除"我删过的会话"：删掉的会话不该再贡献红点，否则列表里看不到它、
+        // 角标却一直挂着数字，用户只会觉得红点消不掉。
         List<ChatSession> sessions = sessionMapper.selectList(Wrappers.<ChatSession>lambdaQuery()
-                .and(w -> w.eq(ChatSession::getUserA, userId).or().eq(ChatSession::getUserB, userId)));
+                        .and(w -> w.eq(ChatSession::getUserA, userId).or().eq(ChatSession::getUserB, userId)))
+                .stream().filter(s -> !s.deletedFor(userId)).toList();
         Map<Long, ChatSession> byId = sessions.stream()
                 .collect(Collectors.toMap(ChatSession::getId, s -> s, (a, b) -> a));
 
@@ -321,6 +420,12 @@ public class ChatService {
             update.setRiskLevel(riskLevel);
         }
         sessionMapper.updateById(update);
+        // 对方删过这个会话的话，把它恢复出来 —— 否则消息落库了、对方却永远看不到，
+        // 等于静默丢消息（这是"每用户软删除"最容易漏的一步）
+        if (session.deletedFor(receiverId)) {
+            sessionMapper.restoreDeleted(sessionId);
+            log.info("[chat][send][{}] 接收方此前删除了会话，已自动恢复", sessionId);
+        }
         incrementUnread(session, receiverId);
 
         ChatMessageVO vo = toMessageVO(message, senderId, clientMsgId);
@@ -409,8 +514,18 @@ public class ChatService {
         return session;
     }
 
-    /** 新号限额（PRD BR-01 / FR-IM-07）：注册 7 天内每日私聊不超过 sys_user.chat_limit 条 */
+    /**
+     * 新号限额：注册 {@code newUserDays} 天内每日私聊不超过 {@code sys_user.chat_limit} 条。
+     *
+     * <p>**默认关闭**（{@code ershou.chat.daily-limit-enabled=false}）。
+     * 2026-10-01 产品决定取消：校园场景下"新号每天 20 条"很容易误伤 ——
+     * 正常砍价来回几句就见底，用户只会当成"聊天坏了"。
+     * 代码与配置都留着，需要时打开开关即可恢复。
+     */
     private void checkDailyLimit(Long userId) {
+        if (!props.isDailyLimitEnabled()) {
+            return;
+        }
         SysUser user = userService.getById(userId);
         boolean newUser = user.getCreatedAt() != null
                 && user.getCreatedAt().isAfter(LocalDateTime.now().minusDays(props.getNewUserDays()));

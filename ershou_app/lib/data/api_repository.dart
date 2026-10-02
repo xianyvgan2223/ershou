@@ -56,6 +56,8 @@ class ItemRepository {
     String? keyword,
     int? categoryId,
     String? sort,
+    /// 按面交点精确筛选（地图上点一个交易点 → 看这个点位的商品）
+    int? preferPointId,
   }) async {
     final raw = await pageRaw(
       pageNum: pageNum,
@@ -63,6 +65,7 @@ class ItemRepository {
       keyword: keyword,
       categoryId: categoryId,
       sort: sort,
+      preferPointId: preferPointId,
     );
     if (raw == null) {
       return const PageResult<Item>(total: 0, pageNum: 1, pageSize: 20, records: []);
@@ -78,6 +81,7 @@ class ItemRepository {
     String? keyword,
     int? categoryId,
     String? sort,
+    int? preferPointId,
   }) async {
     final env = await _api.envelope<Map<String, dynamic>>(
       () => _api.dio.get<dynamic>('/items', queryParameters: {
@@ -86,6 +90,7 @@ class ItemRepository {
         if (keyword != null && keyword.isNotEmpty) 'keyword': keyword,
         if (categoryId != null) 'categoryId': categoryId,
         if (sort != null && sort.isNotEmpty) 'sort': sort,
+        if (preferPointId != null) 'preferPointId': preferPointId,
       }),
       parse: (data) => (data as Map).cast<String, dynamic>(),
     );

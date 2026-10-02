@@ -41,11 +41,31 @@ export interface PublicUserVO {
   self: boolean
 }
 
+/**
+ * 黑名单里的一条。
+ *
+ * 后端原本返回的是裸的 user_block 实体（只有 blockedUserId + 时间），
+ * 前端拿到一个数字没法渲染列表 —— 现在后端补上了昵称/头像/信用等展示字段，
+ * 但**不含手机号等任何联系方式**（黑名单页没有理由比公开主页看到更多）。
+ */
 export interface UserBlockRow {
   id: number
-  userId: number
   blockedUserId: number
+  nickname: string | null
+  avatar: string | null
+  creditScore: number | null
+  /** 1=商家 / 2=代卖员 / 4=校内邮箱已验证（位标记） */
+  identityFlag: number | null
+  shopName: string | null
+  schoolName: string | null
+  campusName: string | null
   createdAt: string
+  /**
+   * 对方是否也拉黑了我。
+   * 双向拉黑时「解除」只是单方面解除，对方仍然拉黑着你 ——
+   * 页面必须说清楚，否则用户会以为解除后就能正常私聊了。
+   */
+  blockedByPeer: boolean | null
 }
 
 /** 编辑我的资料：昵称 / 头像 / 学校校区 / 小铺信息，返回更新后的完整资料 */
@@ -67,7 +87,7 @@ export function unblockUser(userId: number | string): Promise<null> {
   return http.delete<null>(`/users/${userId}/block`)
 }
 
-/** 我拉黑过的人 */
+/** 我拉黑过的人（带昵称/头像，可直接渲染列表） */
 export function fetchBlockedUsers(): Promise<UserBlockRow[]> {
   return http.get<UserBlockRow[]>('/users/blocks')
 }

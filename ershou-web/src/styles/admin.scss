@@ -1,0 +1,232 @@
+// =============================================================
+// 运营后台 · 统一视觉规则（2026-10-02「太花了」的整改）
+// =============================================================
+// 管理台是**长时间盯着看的工作界面**，不是营销页。所以规则是"克制"：
+//
+// 1. **颜色要有分工，不能都是彩色**：
+//    绿 = 品牌/主操作；红 = 破坏性操作（下架/删除/封禁）；橙 = 需要注意；
+//    其余（状态、时间、次要信息）一律**中性灰**。
+//    整改前的毛病是 `--el-color-success` 与 `--el-color-primary` 是同一个绿，
+//    于是"在售""已审核""新上架"全是绿 tag，一屏几十个彩色块 = 花。
+// 2. **只保留一层阴影**。原来面板有 shadow-sm、卡片又有 shadow、统计卡再带
+//    左侧彩色竖条，三层装饰叠在一起。
+// 3. **表格是主角**：行高、字号、对齐统一；操作列不用实心大按钮，
+//    用紧凑按钮 + 危险操作朴素的红色描边。
+// 4. **说明文字收进"帮助"胶囊**，不常驻占版面（要看看，不要时不抢注意力）。
+//
+// 用法：页面根元素加 class="admin-page"，然后按下面的类名组织内容即可。
+// =============================================================
+
+.admin-page {
+  // 统一面板：一层淡边框 + 一层极浅阴影，不再叠加
+  .panel {
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .panel + .panel {
+    margin-top: 12px;
+  }
+
+  // 面板标题：去掉左侧那根绿色竖条（每个面板都有一根，一屏好几根 = 花）
+  .panel-title {
+    margin-bottom: 10px;
+    color: var(--text-1);
+    font-size: 14.5px;
+    font-weight: 600;
+
+    &::before {
+      display: none;
+    }
+  }
+
+  // 辅助文字：默认中性
+  .text-muted {
+    color: var(--text-3);
+  }
+}
+
+/* ---------------- 统计卡：数字是主角 ---------------- */
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.admin-stat {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+
+  &__num {
+    color: var(--text-1);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.15;
+    // 数字用等宽字形，位数变化时不会左右抖动
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__label {
+    margin-top: 2px;
+    color: var(--text-3);
+    font-size: 11.5px;
+  }
+
+  // 只有"需要人处理的"那个数字用品牌色 + 一点底色，
+  // 其余保持中性 —— 一眼就知道该看哪个
+  &.is-primary {
+    border-color: var(--brand-200);
+    background: var(--brand-50);
+
+    .admin-stat__num {
+      color: var(--brand-700);
+    }
+
+    .admin-stat__label {
+      color: var(--brand-600);
+    }
+  }
+}
+
+/* ---------------- 工具条：一行放完，不堆两行 ---------------- */
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+
+  &__spacer {
+    flex: 1;
+  }
+
+  &__count {
+    color: var(--text-3);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+}
+
+/* ---------------- 帮助胶囊：说明文字按需展开 ---------------- */
+.admin-help {
+  margin-bottom: 10px;
+
+  &__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-3);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+      color: var(--brand-600);
+    }
+  }
+
+  &__body {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--brand-200);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 12.5px;
+    line-height: 1.75;
+
+    strong {
+      color: var(--text-1);
+      font-weight: 600;
+    }
+  }
+}
+
+/* ---------------- 表格：一行看完，标注不抢戏 ---------------- */
+.admin-table {
+  .el-table {
+    --el-table-border-color: var(--line);
+    --el-table-row-hover-bg-color: var(--surface-2);
+    font-size: 13px;
+  }
+
+  .el-table th.el-table__cell {
+    padding: 8px 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line-strong);
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .el-table .el-table__cell {
+    padding: 10px 0;
+  }
+
+  // 去掉 striped：斑马纹 + 各种彩色 tag 叠在一起最显花
+  .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+    background: transparent;
+  }
+
+  // 标注类 tag 一律中性：只有"危险/需注意"才用颜色（见 .is-danger / .is-warn）
+  .el-tag {
+    height: 20px;
+    padding: 0 6px;
+    border: none;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 11.5px;
+    line-height: 20px;
+
+    &.is-danger {
+      background: #fef2f4;
+      color: var(--el-color-danger);
+    }
+
+    &.is-warn {
+      background: #fff8eb;
+      color: #b45309;
+    }
+
+    &.is-brand {
+      background: var(--brand-50);
+      color: var(--brand-700);
+    }
+  }
+
+  // 操作列的按钮：紧凑、不做实心大按钮
+  .admin-ops {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+
+    .el-button {
+      margin-left: 0;
+    }
+
+    .el-button--primary.is-link,
+    .el-button--primary.is-text {
+      color: var(--brand-600);
+      font-weight: 600;
+    }
+
+    .el-button--danger.is-link,
+    .el-button--danger.is-text {
+      color: var(--el-color-danger);
+    }
+  }
+}
+
+/* ---------------- 移动端：统计卡两列 ---------------- */
+@media (max-width: 900px) {
+  .admin-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

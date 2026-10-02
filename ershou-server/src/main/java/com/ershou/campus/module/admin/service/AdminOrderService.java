@@ -9,6 +9,7 @@ import com.ershou.campus.module.order.entity.MeetupOrder;
 import com.ershou.campus.module.order.mapper.MeetupOrderMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /** 面交单查询（成交明细 / 异常订单排查） */
 @Service
@@ -20,7 +21,7 @@ public class AdminOrderService {
     private final MeetupOrderMapper orderMapper;
     private final AdminViewAssembler assembler;
 
-    public PageResult<AdminOrderVO> page(Integer status, Long buyerId, Long sellerId,
+    public PageResult<AdminOrderVO> page(Integer status, Long buyerId, Long sellerId, String keyword,
                                          long pageNum, long pageSize) {
         LambdaQueryWrapper<MeetupOrder> w = Wrappers.<MeetupOrder>lambdaQuery();
         if (status != null) {
@@ -31,6 +32,11 @@ public class AdminOrderService {
         }
         if (sellerId != null) {
             w.eq(MeetupOrder::getSellerId, sellerId);
+        }
+        if (StringUtils.hasText(keyword)) {
+            String kw = keyword.trim();
+            // 订单号或商品标题命中即可；用 and(...) 包一层括号，避免 OR 泄漏到其它条件的 AND 上
+            w.and(q -> q.like(MeetupOrder::getOrderNo, kw).or().like(MeetupOrder::getItemTitle, kw));
         }
         w.orderByDesc(MeetupOrder::getId);
         Page<MeetupOrder> page = orderMapper.selectPage(

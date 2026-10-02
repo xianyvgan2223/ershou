@@ -21,7 +21,16 @@ public class ChatProperties {
     private int historySize = 20;
     private int maxHistorySize = 50;
 
-    /** 新号限额生效天数（PRD BR-01：注册 7 天内每日私聊 ≤ chat_limit 条） */
+    /**
+     * 新号每日私聊限额开关。
+     *
+     * <p>**默认关闭**（2026-10-01 产品决定）：校园场景里"注册 7 天内每天只能发 20 条"
+     * 太容易误伤 —— 正常砍个价来回几句就见底了，用户只会觉得"聊天坏了"。
+     * 代码保留着，需要时把 `ershou.chat.daily-limit-enabled` 打开即可。
+     */
+    private boolean dailyLimitEnabled = false;
+
+    /** 新号限额生效天数（仅在 dailyLimitEnabled=true 时有意义） */
     private int newUserDays = 7;
 
     /** 在线心跳有效期：连接/心跳时刷新，超过即视为离线 */

@@ -1,33 +1,24 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Location, Plus } from '@element-plus/icons-vue'
 import { checkoutCart } from '@/api/cart'
 import type { CheckoutResult } from '@/api/cart'
 import { createMeetupOrder } from '@/api/order'
-import { pointTypeLabel } from '@/api/map'
-import { useTradePoints } from '@/composables/useTradePoints'
-import {
-  MEETUP_MAX_DAYS,
-  MEETUP_MAX_HOURS,
-  defaultMeetupRange,
-  disabledMeetupDate,
-  formatMeetupDuration,
-  validateMeetupRange,
-} from '@/utils/meetup'
+// 面交点 / 时间窗的校验、点位选择器都不再需要：买家不填这两项（见下方说明）
 
 /**
  * 约面交弹窗：单品直接约（商品详情页）与购物车合并面交共用一套表单。
- * 时间窗默认 1 小时后 ~ 2 小时后，并做与后端一致的本地校验，避免填完才报 40005。
+ *
+ * <p>⚠️ **买家提交意向时不决定面交地点与时间**（2026-10-01 产品规则）：
+ * 商品在卖家手上，见面的地点与时间由卖家定（他在「我的面交 → 我卖出的」里设置），
+ * 买家想改就在私聊里商量。所以这里只留"留言"—— 以前让买家填面交点+时间窗，
+ * 等于让买家替卖家做决定，和后来的权限规则自相矛盾。</p>
  */
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
     /** 单品：商品 id */
     itemId?: number
-    /** 单品：卖家推荐点位，作为默认值 */
-    preferPointId?: number | null
     /** 购物车：勾选的购物车条目 id */
     cartIds?: number[]
     /** 购物车：件数，仅用于文案 */
@@ -37,7 +28,6 @@ const props = withDefaults(
   }>(),
   {
     itemId: undefined,
-    preferPointId: null,
     cartIds: () => [],
     itemCount: 0,
     title: '',
@@ -49,19 +39,8 @@ const emit = defineEmits<{
   (e: 'success', result: CheckoutResult): void
 }>()
 
-const router = useRouter()
-// options 是"100 米内合并后"的展示列表；findPoint 查的仍是原始点位（拿精确地址）
-const {
-  options: pointOptions,
-  loading: pointsLoading,
-  load: loadPoints,
-  find: findPoint,
-} = useTradePoints()
-
 const submitting = ref(false)
 const form = reactive({
-  pointId: undefined as number | undefined,
-  timeRange: [] as string[],
   remark: '',
 })
 
@@ -72,48 +51,17 @@ const visible = computed({
 
 const isBatch = computed(() => props.cartIds.length > 0)
 const dialogTitle = computed(() => props.title || (isBatch.value ? '合并面交' : '约面交'))
-const selectedPoint = computed(() => findPoint(form.pointId))
-const durationText = computed(() => formatMeetupDuration(form.timeRange))
 
-/** 重新选日期时的时间默认值：现在 ~ 2 小时后，避免选完两个日期得到 0 长度时间窗 */
-const defaultTimes = computed<[Date, Date]>(() => {
-  const start = new Date()
-  start.setSeconds(0, 0)
-  return [start, new Date(start.getTime() + 2 * 3600 * 1000)]
+watch(visible, (open) => {
+  if (open) form.remark = ''
 })
-
-watch(visible, async (open) => {
-  if (!open) return
-  form.remark = ''
-  form.timeRange = defaultMeetupRange()
-  const list = await loadPoints(true)
-  if (!list.length) {
-    form.pointId = undefined
-    return
-  }
-  // 默认优先卖家推荐的点位，其次上次选过的；都没有就不预选（留空=待协商）
-  form.pointId = [props.preferPointId, form.pointId].find(
-    (id) => id !== null && id !== undefined && list.some((point) => point.id === id),
-  ) as number | undefined
-})
-
-function goMap(): void {
-  visible.value = false
-  router.push('/map')
-}
 
 async function submit(): Promise<void> {
-  // 面交点 / 时间窗都可以留空：留空 = 待协商，双方在私聊里定
-  const invalid = validateMeetupRange(form.timeRange)
-  if (invalid) {
-    ElMessage.warning(invalid)
-    return
-  }
-  const [start, end] = form.timeRange
+  // 地点与时间都不传：由卖家确定（后端也接受留空 = 待协商）
   const payload = {
-    pointId: form.pointId ?? null,
-    timeSlotStart: start ?? null,
-    timeSlotEnd: end ?? null,
+    pointId: null,
+    timeSlotStart: null,
+    timeSlotEnd: null,
     remark: form.remark.trim(),
   }
   submitting.value = true
@@ -143,56 +91,14 @@ async function submit(): Promise<void> {
     :close-on-click-modal="false"
   >
     <el-form label-width="86px">
+      <!-- 面交点与面交时间**不由买家填**：商品在卖家手上，地点时间由他定
+           （卖家在「我的面交 → 我卖出的」里设置），买家想改就在私聊里商量。 -->
       <el-form-item label="面交点">
-        <el-select
-          v-model="form.pointId"
-          filterable
-          clearable
-          :loading="pointsLoading"
-          placeholder="可选：输入地点名搜索，留空=私聊里商量"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="point in pointOptions"
-            :key="point.id"
-            :label="`${point.name}（${pointTypeLabel(point.type)}）`"
-            :value="point.id"
-          >
-            <span class="booking__option-name">{{ point.name }}</span>
-            <span class="booking__option-type">{{ pointTypeLabel(point.type) }}</span>
-          </el-option>
-          <template #empty>
-            <p class="booking__empty">当前校区还没有可选点位</p>
-          </template>
-          <template #footer>
-            <div class="booking__point-more" @click="goMap">
-              <el-icon><Plus /></el-icon>
-              找不到合适的地点？去地图上推荐一个新点位
-            </div>
-          </template>
-        </el-select>
-        <p v-if="selectedPoint?.guideText" class="booking__guide">
-          <el-icon><Location /></el-icon>
-          {{ selectedPoint.guideText }}
-        </p>
+        <p class="booking__fixed">由卖家确定，定好后会私聊通知你</p>
       </el-form-item>
 
       <el-form-item label="面交时间">
-        <el-date-picker
-          v-model="form.timeRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间（可留空）"
-          end-placeholder="结束时间（可留空）"
-          value-format="YYYY-MM-DD HH:mm:ss"
-          :default-time="defaultTimes"
-          :disabled-date="disabledMeetupDate"
-          style="width: 100%"
-        />
-        <p class="booking__time-tip">
-          <template v-if="durationText">已选 {{ durationText }}，</template>
-          想先约个时间就填，还没定就留空（私聊里商量）。填了的话需在 {{ MEETUP_MAX_DAYS }} 天内、单次不超过 {{ MEETUP_MAX_HOURS }} 小时
-        </p>
+        <p class="booking__fixed">由卖家确定（也可以私聊里商量）</p>
       </el-form-item>
 
       <el-form-item label="留言">
@@ -202,7 +108,7 @@ async function submit(): Promise<void> {
           :rows="2"
           maxlength="100"
           show-word-limit
-          placeholder="例如：我在图书馆三楼，可以提前十分钟到"
+          placeholder="例如：我下午都有空，你定地点就行"
         />
       </el-form-item>
     </el-form>
@@ -212,7 +118,7 @@ async function submit(): Promise<void> {
       type="info"
       :closable="false"
       show-icon
-      :title="`合并面交会把 ${itemCount || cartIds.length} 件商品按卖家拆成多张面交单，共用同一个面交点与时间窗。`"
+      :title="`合并面交会把 ${itemCount || cartIds.length} 件商品按卖家拆成多张面交单，面交点与时间由各卖家分别确定。`"
     />
     <el-alert
       type="info"
@@ -232,6 +138,13 @@ async function submit(): Promise<void> {
 
 <style scoped lang="scss">
 .booking {
+  /* 买家不填的字段：用一行灰字说明"谁来定"，避免留空看起来像没填 */
+  &__fixed {
+    margin: 0;
+    color: var(--ershou-text-light);
+    font-size: 13px;
+  }
+
   &__option-name {
     margin-right: 6px;
   }

@@ -3,10 +3,10 @@ package com.ershou.campus.module.user.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.ershou.campus.common.result.Result;
 import com.ershou.campus.module.user.dto.UserProfileUpdateDTO;
-import com.ershou.campus.module.user.entity.UserBlock;
 import com.ershou.campus.module.user.service.UserBlockService;
 import com.ershou.campus.module.user.service.UserService;
 import com.ershou.campus.module.user.vo.PublicUserVO;
+import com.ershou.campus.module.user.vo.UserBlockVO;
 import com.ershou.campus.module.user.vo.UserVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -57,9 +57,9 @@ public class UserController {
         return Result.ok();
     }
 
-    @Operation(summary = "我拉黑的用户")
+    @Operation(summary = "我拉黑的用户（带昵称/头像，可直接渲染列表）")
     @GetMapping("/blocks")
-    public Result<List<UserBlock>> blocks() {
+    public Result<List<UserBlockVO>> blocks() {
         return Result.ok(userBlockService.list(StpUtil.getLoginIdAsLong()));
     }
 

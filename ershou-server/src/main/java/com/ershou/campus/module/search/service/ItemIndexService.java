@@ -253,13 +253,35 @@ public class ItemIndexService {
 
     // ------------------------------------------------------------ 全量重建
 
-    /** 全量重建（同步执行，供定时/内部调用） */
+    /**
+     * 全量重建（同步执行，供定时/内部调用）。
+     *
+     * <p><b>它是"清空重建"，不是"增量覆盖"</b>：先删掉整个索引再按 MySQL 重建。
+     *
+     * <p>为什么必须这样：这个方法以前只做 upsert（逐条覆盖），**永远不删除多余文档**。
+     * 于是任何"绕过写路径"的数据变化都会在索引里留下幽灵文档 ——
+     * 最典型的是直接用 SQL 删商品（测试脚本经常这么干），ES 根本不知道它们没了。
+     * 实测累积到 {@code ES 311 条 vs MySQL 在售 10 条}，后果是搜索结果 total 虚高：
+     * 搜「自行车」显示"共 12 件"却一条都列不出来（total 来自 ES，records 回库后被 status 过滤掉）。
+     * 管理员点「重新索引」时得到"重建成功"的提示，但幽灵文档一条没少 —— 这个按钮名不副实。
+     */
     public Map<String, Object> reindexAll() {
         ElasticsearchClient client = es.client();
         if (client == null) {
             throw new IllegalStateException("Elasticsearch 当前不可用：" + es.lastError());
         }
         long startedAt = System.currentTimeMillis();
+        // 先删索引：不删的话下面全是 upsert，多的文档留着不走。
+        // 全程数据源是 MySQL，删了重建不会丢东西（重建期间搜索会短暂降级到 MySQL LIKE）。
+        String index = props.getIndexName();
+        if (indexExists(client, index)) {
+            try {
+                client.indices().delete(d -> d.index(index));
+                log.info("[search][es] 已删除旧索引 {}，准备按 MySQL 全量重建", index);
+            } catch (Exception e) {
+                throw new IllegalStateException("索引 " + index + " 删除失败（重建已中止）: " + e.getMessage(), e);
+            }
+        }
         String analyzer = ensureIndex();
         int batch = Math.max(props.getBulkSize(), 1);
         long indexed = 0;
@@ -280,12 +302,36 @@ public class ItemIndexService {
         }
         // 水位回拨：重建期间的增量变更下轮再同步一遍（upsert 幂等）
         setWatermark(startedAt - 60_000L);
-        log.info("[search][es] 全量重建完成：{} 件（analyzer={}）", indexed, analyzer);
+        // 显式 refresh：bulk 写入后索引默认要等约 1 秒才可见。
+        // 不刷新的话，"重建完成"返回时 count / 搜索还是旧值（实测刚返回时 _count = 0），
+        // 管理员点完重建看到 docCount=0 会以为重建失败 —— 其实是还没刷新。
+        long visible = refreshAndCount();
+        log.info("[search][es] 全量重建完成：{} 件（analyzer={}，刷新后可见 {} 条）", indexed, analyzer, visible);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("indexName", props.getIndexName());
         result.put("analyzer", analyzer);
         result.put("indexed", indexed);
+        result.put("visible", visible);
+        result.put("rebuilt", true); // 标记这次是清空重建（调用方可据此判断幽灵文档已清掉）
         return result;
+    }
+
+    /** 强制刷新并返回当前可见文档数（重建/清理后要立刻断言一致性时用） */
+    private long refreshAndCount() {
+        ElasticsearchClient client = es.client();
+        if (client == null) {
+            return -1;
+        }
+        try {
+            client.indices().refresh(r -> r.index(props.getIndexName()));
+        } catch (Exception e) {
+            log.warn("[search][es] 刷新索引失败（不影响数据，只是可见性延迟）：{}", e.getMessage());
+        }
+        try {
+            return client.count(c -> c.index(props.getIndexName())).count();
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     /** 后台异步重建，立即返回 */

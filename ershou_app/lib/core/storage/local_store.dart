@@ -37,7 +37,20 @@ class LocalStore {
   }
 
   /// 当前登录用户 id：本地缓存按「服务器 + 用户」分区，冷启动就要能算出来。
-  int get userId => _prefs.getInt(_userIdKey) ?? 0;
+  ///
+  /// ⚠️ 必须容错：这个 getter 在 `main()` 里就被调用，一旦抛异常**整个 App 白屏**
+  /// （2026-10-02 实测踩过：外部注入的 prefs 把 userId 写成了字符串，`getInt` 直接
+  /// 抛 `type 'String' is not a subtype of int`，`main()` 挂掉、界面一片白）。
+  /// 存储里的脏数据不该让 App 起不来 —— 读不出来就当没登录，用户重新登录即可。
+  int get userId {
+    try {
+      return _prefs.getInt(_userIdKey) ?? 0;
+    } catch (_) {
+      // 类型不对（脏数据 / 旧版本写入格式不同）：清掉，别让它每次都炸
+      _prefs.remove(_userIdKey);
+      return 0;
+    }
+  }
 
   Future<void> setUserId(int? id) async {
     if (id == null || id <= 0) {

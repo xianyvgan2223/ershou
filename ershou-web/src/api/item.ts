@@ -31,6 +31,8 @@ export interface ItemVO {
   /** 当前登录用户是否已收藏（未登录恒为 false；列表和详情接口都会返回） */
   favorited?: boolean
   publishedAt: string
+  /** 有效期截止时间：前端据此显示「还剩 X 天自动下架」 */
+  expireAt?: string | null
   seller: SellerBrief
   /** 仅详情接口返回 */
   description?: string
@@ -118,6 +120,14 @@ export function updateItem(id: number, params: UpdateItemParams): Promise<Publis
 /** 下架商品 */
 export function offlineItem(id: number): Promise<null> {
   return http.post<null>(`/items/${id}/offline`)
+}
+
+/**
+ * 重新上架（已下架 / 已过期）。
+ * 后端会把它重新挂满有效期并刷新发布时间；已售出 / 审核未通过 / 违规下架都不允许。
+ */
+export function relistItem(id: number): Promise<PublishItemResult & { expireAt?: string }> {
+  return http.post<PublishItemResult & { expireAt?: string }>(`/items/${id}/relist`)
 }
 
 /** 我的发布 */

@@ -20,6 +20,7 @@ public enum ResultCode {
     ITEM_AUDITING(30003, "商品正在审核中"),
     ITEM_LOCKED(30004, "商品刚被他人锁定，看看同款？"),
     ITEM_NOT_OWNER(30005, "只能操作自己发布的商品"),
+    ITEM_STATUS_ERROR(30006, "当前商品状态不允许该操作"),
 
     ORDER_NOT_FOUND(40001, "面交单不存在"),
     ORDER_NO_PERMISSION(40002, "无权操作该面交单"),
@@ -34,6 +35,11 @@ public enum ResultCode {
     ADMIN_POINT_STATUS(60002, "当前点位状态不允许该审核操作"),
     ADMIN_REASON_REQUIRED(60003, "请填写驳回原因"),
     ADMIN_SELF_OPERATION(60004, "不能对自己执行该操作"),
+
+    /** 上架审核：这条已经被（可能是别的）审核员处置过了，前端把它移出列表即可 */
+    REVIEW_ALREADY_HANDLED(61001, "该商品已被处置，请刷新列表"),
+    /** 上架审核：商品当前状态不允许处置（已被卖家下架/已售出/已过期…） */
+    REVIEW_NOT_ACTIONABLE(61002, "该商品已不在可处置状态，请刷新列表"),
 
     CHAT_SELF(70001, "不能和自己私聊"),
     CHAT_NOT_FOUND(70002, "会话不存在或无权访问"),

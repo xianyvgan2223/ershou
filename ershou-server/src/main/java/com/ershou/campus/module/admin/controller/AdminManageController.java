@@ -62,15 +62,16 @@ public class AdminManageController {
         return Result.ok();
     }
 
-    @Operation(summary = "面交单查询")
+    @Operation(summary = "面交单查询（订单号 / 商品标题搜索）")
     @GetMapping("/orders")
     public Result<PageResult<AdminOrderVO>> orders(@RequestParam(required = false) Integer status,
                                                    @RequestParam(required = false) Long buyerId,
                                                    @RequestParam(required = false) Long sellerId,
+                                                   @RequestParam(required = false) String keyword,
                                                    @RequestParam(defaultValue = "1") long pageNum,
                                                    @RequestParam(defaultValue = "20") long pageSize) {
         adminAuthService.requireAdminId();
-        return Result.ok(orderService.page(status, buyerId, sellerId, pageNum, pageSize));
+        return Result.ok(orderService.page(status, buyerId, sellerId, keyword, pageNum, pageSize));
     }
 
     @Operation(summary = "用户列表（昵称 / 店铺名 / 手机号搜索）")
@@ -95,13 +96,16 @@ public class AdminManageController {
         return Result.ok(userService.adjustCredit(id, dto, adminAuthService.requireAdminId()));
     }
 
-    @Operation(summary = "运营操作审计日志")
+    @Operation(summary = "运营操作审计日志（可按操作类型与时间区间筛选）")
     @GetMapping("/audit-logs")
     public Result<PageResult<AuditLogVO>> auditLogs(@RequestParam(required = false) String module,
                                                     @RequestParam(required = false) Long operatorId,
+                                                    @RequestParam(required = false) String action,
+                                                    @RequestParam(required = false) String startTime,
+                                                    @RequestParam(required = false) String endTime,
                                                     @RequestParam(defaultValue = "1") long pageNum,
                                                     @RequestParam(defaultValue = "20") long pageSize) {
         adminAuthService.requireAdminId();
-        return Result.ok(logService.page(module, operatorId, pageNum, pageSize));
+        return Result.ok(logService.page(module, operatorId, action, startTime, endTime, pageNum, pageSize));
     }
 }

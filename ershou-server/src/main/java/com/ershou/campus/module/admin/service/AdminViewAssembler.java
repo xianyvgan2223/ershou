@@ -174,6 +174,8 @@ public class AdminViewAssembler {
         vo.setPointType(point.getPointType());
         vo.setCoordX(point.getCoordX());
         vo.setCoordY(point.getCoordY());
+        vo.setLng(point.getLng());
+        vo.setLat(point.getLat());
         vo.setSafetyScore(point.getSafetyScore());
         vo.setSafeTags(readStringList(point.getSafeTags()));
         vo.setGuideText(point.getGuideText());
