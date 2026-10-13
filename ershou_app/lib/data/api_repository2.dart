@@ -127,6 +127,17 @@ class ChatRepository {
 }
 
 /// 校内地图点位。
+/// 后端高德 key 的三种状态（见 MapRepository.amapKeyState 的说明）
+enum AmapKeyState {
+  /// 后端已配置，可以画真地图
+  configured,
+
+  /// 后端明确答复"没配 key"——要去 .env 里补 AMAP_JS_KEY
+  missingKey,
+
+  /// 压根没问到后端：网络不通 / 地址不对 / 后端没启动
+  unreachable,
+}
 class MapRepository {
   MapRepository(this._api);
 
@@ -230,18 +241,33 @@ class MapRepository {
     return '$base/map/amap-html?campusId=$campusId&pickable=$pickable$focus$regeo$merged';
   }
 
-  /// 后端有没有配高德 key（没配就退回自绘底图，而不是给用户一个白屏）
-  Future<bool> amapConfigured() async {
+  /// 后端有没有配高德 key（没配就退回自绘底图，而不是给用户一个白屏）。
+  ///
+  /// ⚠️ 这里**必须区分"没配 key"和"连不上后端"**（2026-10-10 修的真 bug）：
+  /// 原来的实现是 `catch (_) { return false; }` —— 网络失败被吞掉，和"真的没配 key"
+  /// 返回同一个 false，界面于是显示"后端还没配置高德 key，请配置 ershou.amap.js-key"。
+  /// 用户和后端都被这句误导：**后端其实配好了 key，只是手机连不上后端**
+  /// （手机在 192.168.236.x、电脑在 10.33.56.248，不同网段）。
+  ///
+  /// 现在返回三态，让界面能说人话：
+  /// - [AmapKeyState.configured] 配好了
+  /// - [AmapKeyState.missingKey] 后端答复了但确实没配 key
+  /// - [AmapKeyState.unreachable] 压根没问到后端（网络/地址/后端没起）
+  Future<AmapKeyState> amapKeyState() async {
     try {
       final env = await _api.envelope<bool>(
         () => _api.dio.get<dynamic>('/map/amap-status'),
         parse: (data) => (data as Map)['configured'] == true,
       );
-      return env.data ?? false;
+      return (env.data ?? false) ? AmapKeyState.configured : AmapKeyState.missingKey;
     } catch (_) {
-      return false;
+      return AmapKeyState.unreachable;
     }
   }
+
+  /// 兼容旧调用：只关心"能不能画真地图"
+  Future<bool> amapConfigured() async =>
+      await amapKeyState() == AmapKeyState.configured;
 
   /// 用户在地图上新增面交点（免审核、每次新建、不做同名合并）
   Future<MapPoint> createPoint({

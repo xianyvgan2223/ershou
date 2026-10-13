@@ -92,6 +92,32 @@ class LocalStore {
 
   Future<void> removeJsonCache(String key) => _prefs.remove(_cachePrefix + key);
 
+  // ---------------------------------------------------------------- 界面偏好
+
+  /// 界面偏好（"我附近"是否折叠这类用户自己选的小开关）。
+  ///
+  /// 单独用 `ershou.ui.` 前缀，便于一眼看出哪些是纯展示层的东西。
+  /// 读的时候**带类型兜底**：存储里是脏数据就返回默认值，而不是抛异常 ——
+  /// 这类 getter 可能在 build 里被调用，抛出去就是整页白屏（这个坑踩过一次）。
+  static const _uiPrefix = 'ershou.ui.';
+
+  bool uiFlag(String key, {bool fallback = false}) {
+    try {
+      return _prefs.getBool(_uiPrefix + key) ?? fallback;
+    } catch (_) {
+      _prefs.remove(_uiPrefix + key);
+      return fallback;
+    }
+  }
+
+  Future<void> setUiFlag(String key, bool value) async {
+    try {
+      await _prefs.setBool(_uiPrefix + key, value);
+    } catch (_) {
+      // 偏好写不进去不值得影响主流程
+    }
+  }
+
   Future<void> clearSession() async {
     await _prefs.remove(_tokenKey);
     await _prefs.remove(_userKey);

@@ -12,7 +12,7 @@
 | 后端 | `ershou-server/` | Spring Boot 3.3.5 + MyBatis-Plus 3.5.9 + Sa-Token + MinIO + Elasticsearch 8 + WebSocket |
 | 前端 | `ershou-web/` | Vue 3.5 + Vite 6 + TypeScript + Element Plus + Leaflet |
 | 数据库 | `sql/schema.sql` | MySQL 8，20 张表 + 种子数据 |
-| 依赖编排 | `docker-compose.yml` | Redis（6380）+ MinIO（9010/9011）+ Elasticsearch（9210），手动启动 |
+| 依赖编排 | `docker-compose.yml` | Redis（6380）+ MinIO（9010/9011）+ Elasticsearch（9211），手动启动 |
 
 ---
 
@@ -23,11 +23,18 @@
 | MySQL | 127.0.0.1:3306 | 服务名 **MySQL**（不是 MySQL80，那个是 3308），库 `ershou`，账号 `ershou` |
 | Redis | 127.0.0.1:**6380** | 容器 `ershou-redis`，避开青光眼项目的 6379 |
 | MinIO | API **9010** / 控制台 **9011** | 容器 `ershou-minio`，桶 `ershou` 由后端启动时自动创建 |
-| Elasticsearch | http://127.0.0.1:**9210** | 容器 `ershou-es`，商品搜索索引 `ershou_item`（后端启动自动建索引+全量同步） |
+| Elasticsearch | http://127.0.0.1:**9211** | 容器 `ershou-es`（容器内仍是 9200），商品搜索索引 `ershou_item`（后端启动自动建索引+全量同步） |
 | 后端 | http://127.0.0.1:8080 | 接口文档 /swagger-ui.html |
 | 前端 | http://localhost:5173 | /api 代理到 8080 |
 
 **所有密码集中在根目录 `.env`（已 gitignore）**，`.env.example` 是模板。
+
+> ⚠️ **ES 为什么是 9211 而不是 9210**（2026-10-10 排查出来的环境冲突）：
+> `[::]:9210` 被 WSL 里的 `wsl-bootstrap` 占着，Windows 侧 `127.0.0.1:9210` 还被 QQ 占了。
+> 结果是访问 9210 拿到的是**别的服务**的报错（一个 JWT 错误），
+> **真实 ES 从头到尾没被访问到** → `POST /search/reindex` 稳定报 `90001`，
+> 看起来像代码 bug，其实代码完全正常。换到 9211（已确认两侧空闲）后恢复正常。
+> 以后遇到"某个接口稳定报通用错误、错误信息毫无指向性"，先核实**依赖服务是否真在它该在的端口上**。
 
 ## 一·五、手机端（Flutter）局域网联调
 
@@ -35,15 +42,64 @@
 | --- | --- |
 | `ershou_app/` | Flutter Android 客户端（详见 `ershou_app/README.md`） |
 | `scripts/lan-info.ps1` | 打印手机该连的 IP + 自测 8080，换网络后跑一下 |
+| `scripts/mobile-connect.ps1` | **推荐**：用 USB 数据线建 adb reverse 隧道（见下），不怕 IP 变、不要求同网段 |
 | `LanDiscoveryResponder` | 后端 UDP **48899** 应答，手机「一键扫描」靠它秒连（**需重启后端生效**） |
 
 ```powershell
-# 手机端连不上时的排查顺序（校园网 IP 会变、可能开 APK 隔离）
+# 方式一（推荐，USB 连着就行）：手机 ↔ 电脑建隧道，绕开网段问题
+powershell -ExecutionPolicy Bypass -File .\scripts\mobile-connect.ps1
+
+# 方式二（WiFi 直连）：先看该连哪个 IP，再在 App 里手动填
 powershell -ExecutionPolicy Bypass -File .\scripts\lan-info.ps1
 ```
 
-App 里提供三条连接路径：**一键扫描**（UDP 广播 → 网段扫描）、**手动输入 IP:8080**、**扫二维码**；
+App 里提供三条连接路径：**一键扫描**（UDP 广播 → 网段扫描 → **USB 隧道**）、**手动输入 IP:8080**、**扫二维码**；
 冷启动会先探测上次用过的地址，能用就直接进登录页。
+
+### 为什么推荐 USB 隧道（`scripts/mobile-connect.ps1`）
+
+**校园网 / 热点一换，电脑 IP 就变，手机里存的旧地址立刻失效**。2026-10-10 实际踩到：
+手机在 `192.168.236.0/24`、电脑 WLAN 在 `10.33.56.248`（**不同网段，互相 ping 不通**），
+App 里存的还是 `192.168.236.112` —— 打开地图就报错。用 adb reverse 走 USB 就完全绕开这件事：
+
+```powershell
+adb reverse tcp:8080 tcp:8080   # 后端 API
+adb reverse tcp:9010 tcp:9010   # MinIO 图片（⚠️ 不转发商品图会全部加载失败）
+adb reverse tcp:9011 tcp:9011   # MinIO 控制台
+```
+
+之后 App 里填 **`127.0.0.1:8080`**（连接页「一键扫描」也会识别成「USB 隧道」）。
+脚本把三条隧道 + 手机侧实测 + "是否同网段"的判断都做完了。
+
+> ⚠️ **拔掉 USB、重启 adb 或重启电脑后隧道会失效**，重新跑一次脚本即可。
+
+### 地图打不开时，先看它到底在说什么
+
+这条曾经把我坑了好几轮：**"后端还没配置高德 key" 这句话原先是错的**。
+
+`map_page.dart` 当时只有 `_amapReady` 一个布尔量，而 `MapRepository.amapConfigured()` 是
+`catch (_) { return false; }` —— **网络失败被吞掉，和"真的没配 key"返回同一个 false**。
+于是"手机连不上后端"被显示成"后端没配 key"，误导人去 `.env` 里反复折腾（后端其实配好了）。
+
+现在改成**三态** `AmapKeyState { configured, missingKey, unreachable }`，提示按真实原因给：
+
+| 状态 | 提示 |
+| --- | --- |
+| `missingKey` | "后端还没配置高德 key……在后端 .env 里补 `AMAP_JS_KEY`" |
+| `unreachable` | "**连不上后端**，请确认后端已启动、App 里的服务器地址正确（USB 调试可跑 `mobile-connect.ps1`）" |
+
+**排查顺序**：① 后端起了吗（`GET /api/v1/map/amap-status` 的 `configured`）→ ② 手机能连到后端吗（地址/网段/隧道）→ ③ 才是 key。
+
+### 后端用 IDEA 启动就够（不必用脚本）
+
+**IDEA 直接 Run `CampusApplication` 是完全支持的**，`.env` 会自动加载 ——
+`DotenvEnvironmentPostProcessor` 按候选路径找 `.env`（工作目录、上一级、上上级，
+也认 `ERSHOU_ENV_FILE` 环境变量），IDEA 的工作目录是 `ershou-server`，正好命中"上一级"。
+实测：IDEA 起的实例 `amap-status` → `configured: true`、`amap-html` 12092 字节（真地图页）。
+
+> ⚠️ **端口 8080 只能有一个后端**。用 IDEA 起了之后，别再跑 `dev-server.ps1`（会抢端口失败），
+> 反过来也一样。改完代码 IDEA 里点重启即可，不需要切到脚本。
+
 
 ### 登录态：一次登录长期有效（不用反复登录）
 
@@ -131,17 +187,32 @@ docker compose up -d --build elasticsearch
 
 # 3a) 只改了 synonyms.txt，想不重建容器就生效：
 docker cp docker/es/synonyms.txt ershou-es:/usr/share/elasticsearch/config/analysis-ik/synonyms.txt
-Invoke-WebRequest -Method Post http://127.0.0.1:9210/ershou_item/_reload_search_analyzers
+Invoke-WebRequest -Method Post http://127.0.0.1:9211/ershou_item/_reload_search_analyzers
 
 # 3b) 改了 custom.dic（新增词）：必须重建索引，文档切分才会用上新词
-Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后端会自动重建
+Invoke-WebRequest -Method Delete http://127.0.0.1:9211/ershou_item   # 重启后端会自动重建
+```
+
+**核对索引一致性时别踩这个坑**：索引里存的是**所有状态**的商品（设计如此：状态流转只 upsert 不删文档，
+公开检索固定过滤 `status=2`），所以**不能**拿 `_count` 直接和 `WHERE status=2` 比 —— 必然不等，
+会被误判成"索引不一致"。两个口径要分别对：
+
+```powershell
+# 全部（docCount）
+curl.exe "http://127.0.0.1:9211/ershou_item/_count"                  # ↔ SELECT COUNT(*) FROM item
+# 在售（visible，即用户实际能看到几件）
+curl.exe "http://127.0.0.1:9211/ershou_item/_count?q=status:2"       # ↔ ... WHERE status=2
+# 重建接口同时返回这两个数：{"indexed":12,"visible":10,"docCount":12,...}
 ```
 
 > 两条硬性规则（都是踩过的坑）：① 同义词每个条目必须是**一个词** —— 简称要先写进 `custom.dic`，否则 IK 把「高数」切成「高|数」，规则永远不命中；② 不要写多词短语（如「平板电脑」「移动电源」），同义词的值会再走一遍分词，把子词带进查询造成过度扩展（搜「平板」会连带搜到「电脑」）。
 
 ## 三、已实现功能
 
-### 后端（137 个 Java 文件 / 66 个接口）
+### 后端（162 个 Java 文件 / 88 个接口）
+
+> 数字按 **2026-10-10 实测**更新（`GET /v3/api-docs` 里的操作数）；
+> 这类统计会随改动过期，别当承诺看，以代码为准。
 
 | 模块 | 能力 |
 | --- | --- |
@@ -179,7 +250,9 @@ Invoke-WebRequest -Method Delete http://127.0.0.1:9210/ershou_item   # 重启后
 | **Redis 读缓存** | 商品详情（10 分钟 + 空值缓存防穿透）、地图点位含在售数/最低价（30 分钟，版本号 O(1) 整体失效）、分类/学校/校区/点位字典（1 小时，MGET 消 N+1）、运营概览 8 个 count（30 秒）；浏览量走 Redis 计数 + 每 10 分钟批量回写；失效统一在 `TxHooks.afterCommit` 执行；`ershou.cache.enabled=false` 一键回滚 |
 | 通用 | 统一响应体 + 错误码分段 + 全局异常 + traceId 链路 + 分页 + Swagger |
 
-### 前端（18 个页面 / 49 个源文件）
+### 前端（21 个页面 / 8 个业务组件 / 66 个 ts+vue 源文件）
+
+> 数字按 **2026-10-10 实测**更新（`src/views/*.vue` 21 个、`src/components/*.vue` 8 个）。
 
 登录、首页（搜索/分类/排序/分页 + 商品卡片**浏览量徽标**）、**校内地图**（双模式：`map_type=1` Leaflet CRS.Simple 自绘平面图 / `map_type=2` **高德 JS API 真地图 + 定位蓝点 + 米制距离**）、商品详情、发布（多图上传）、购物车（分组 + 合并面交）、我的面交单（买家/卖家双 tab、核销）、我的收藏、我的发布、**商品详情（约面交直接下单：选面交点 + 时间窗，面交点下拉可输入搜索）**、**个人中心（含编辑资料：点头像或按钮打开弹窗，改昵称/头像/学校校区/小铺，头像走 MinIO 单图上传）**、**消息（私聊：会话列表 + 聊天窗 + 快捷话术 + 未读红点，断线指数退避重连）**。
 
@@ -299,9 +372,35 @@ AI 机审只做"可疑转人工"，此前没有人工处置入口，这类商品
 **上架审核页验收**：scripts/verify-admin-review.mjs（**30 项断言**，真 Chrome）。
 **个人中心验收**：scripts/verify-profile-page.mjs（**20 项断言**，真 Chrome；**同时覆盖空数据与有数据两种状态**）。
 **黑名单验收**：scripts/verify-blocklist.mjs（**23 项断言**，真 Chrome；含空状态、双向拉黑标记、真实解除，跑完自动清理）。
+**商品编辑验收**：scripts/verify-item-edit.mjs（**20 项断言**，真 Chrome；自己发一件商品来测、跑完删掉并重建索引；含属主可见性、字段回显、改价/改标题后接口与页面双确认、已售出不可编辑）。
+**合并点位验收**：scripts/verify-merged-point-e2e.mjs（**4 项断言**；自造"组内每个点位各一件商品"的现场，**用基线对比**证明"只查代表点会少显示"）。
+**选点针验收**：scripts/verify-pick-pin.mjs（**11 项断言**，真 Chrome；真的开弹窗、真的点地图、读计算样式确认没画成数字气泡）。
+**数据恢复**：scripts/restore-demo-data.ps1（**默认干跑**，加 `-Apply` 才改）。
+演示商品默认只挂 7 天，**过一周首页会空**（这是功能正常），跑它即可重新上架 + 清测试残留 + 重建索引。
+
+### 商品编辑（详情页 + 我的发布共用）
+
+`components/ItemEditDialog.vue`，字段与后端 `ItemUpdateDTO` 对齐（标题/描述/分类/成色/价格/原价/可议价/库存/图片/面交点）。
+
+- **可编辑范围以后端为准**：`ItemService.update` 只拦 `status == 4`（已售出）。
+  前端别自己发明额外限制 —— 写错过一次（白名单漏了 0/8 又没排除已售出，
+  导致已售出的商品还能点「修改商品」、点下去才被后端拒绝）。
+- 改标题/描述/图片会**重新过内容审核**：命中禁售词直接拦（`50001`），可疑词打回「审核中」，
+  商品暂时从在售列表消失 —— 弹窗里必须明说，否则卖家以为"改个名字怎么东西没了"。
+
+### 地图合并点位：点开要看**组内全部**商品
+
+100 米内的点位在地图上合并成一个气泡（角标是**组内点位数**，不是件数）。
+点开时必须按**组内所有点位**查商品：
+
+- 后端：`GET /items?preferPointIds=1,2,3`（逗号分隔，一次 `IN` 查询，上限 50）；
+- 移动端：`PointGroup.itemQueryPointIds()`（命名方法，有单测钉着）；
+- 网页端：`MapView.vue` 的 `selectedGroupIds`。
+
+> ⚠️ 2026-10-10 修的真实 bug：移动端只按**代表点**查 → 气泡写"3 个点位"、小窗只有 1 件商品
+> （用户原话"合并点只能看到一个商品"）。验收脚本同时证明了旧行为确实少显示。
 
 ### 黑名单（/blocked）
-
 拉黑/解除的**动作**入口在聊天窗与用户主页，**查看与解除**统一在 `/blocked`
 （个人中心「我的黑名单」、聊天页头部「黑名单」都能进）。
 
@@ -746,12 +845,20 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 
 **点交易点 → 就地看商品（移动端，2026-10-02）**
 
-点地图上的交易点，底部弹**商品小窗**（高 132px，横向滑动，只占屏幕约 1/6）：
+点地图上的交易点，底部弹**商品小窗**（高 **134px**，横向滑动，只占屏幕约 1/6）：
 
 - 小窗在上、点位信息条在下，**不跳页**（以前点「看商品」会 push 一个整页列表，地图就看不见了）；
 - 小窗里的卡片是"图 + 标题一行 + 价格"，整块可点进商品详情；
 - 点位信息条右侧保留了「看全部」入口（要挑选时仍可进整页）；
 - 一件都没有时小窗**不占位置**（信息条里已经写了"暂无在售"）。
+- 点的是**合并气泡**（角标是组内点位数）时，小窗列的是**组内所有点位**的商品，不是只有代表点那一件。
+
+**左上角「我附近」窗口（移动端，2026-10-10 改成可折叠）**
+
+- 列表条数取决于周围有多少点位（实测能到 **12 条**），所以**高度封顶 210px**，超出内部滚动；
+- 点标题栏折叠成一个小胶囊（显示"我附近 N"），**折叠状态写本地**，重进地图保持收起；
+- 抽成独立组件 `ui/widgets/map_nearby_window.dart`，有 7 项 widget 测试钉着
+  （写测试时当场抓到收起态胶囊写死宽度导致 `RenderFlex overflowed by 19 pixels`）。
 
 > ⚠️ **两个件数口径别混用**（踩过）：
 > `itemCount` 是"还有戏"（草稿/审核中/在售/已锁定），`onSaleCount` 才只有在售。
@@ -759,7 +866,8 @@ chrome --headless=new --dump-dom http://localhost:5173/map | Select-String 'data
 > 差的那些还在审核中，买家本来就看不到。现在**展示给买家的都用 `onSaleCount`**，
 > 但**清理空点位等运营逻辑仍必须用 `itemCount`**（审核中的商品也算这个点位的，见上文）。
 
-**按点位查商品**：`GET /api/v1/items?preferPointId=2`
+**按点位查商品**：`GET /api/v1/items?preferPointId=2`（单个点位）
+/ `GET /api/v1/items?preferPointIds=1,2,3`（**合并组**，逗号分隔、上限 50 个）
 （以前移动端是"拉 50 条再按 `preferPointName` 过滤"：同名点位会串、超过一页就漏。
 注意 ES 索引里没有这个字段，所以带 `preferPointId` 的查询**强制走 MySQL**，
 见 `ItemSearchService.supports`。）

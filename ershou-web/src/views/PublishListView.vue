@@ -3,8 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock, Refresh } from '@element-plus/icons-vue'
-import { fetchMyItems, offlineItem, relistItem, updateItem } from '@/api/item'
+import { fetchMyItems, offlineItem, relistItem } from '@/api/item'
 import type { ItemVO } from '@/api/item'
+import ItemEditDialog from '@/components/ItemEditDialog.vue'
 import {
   ITEM_STATUS,
   conditionLabel,
@@ -116,65 +117,22 @@ async function handleRelist(item: ItemVO): Promise<void> {
 }
 
 /**
- * 编辑弹窗：只放最常改的几项（标题 / 价格 / 原价 / 描述 / 成色）。
+ * 编辑弹窗：**用共用组件 ItemEditDialog**（详情页也用同一个）。
  *
- * 通过校验的字段才提交（undefined 的不动），避免把没改的字段回传覆盖。
- * 改了标题或描述后端会重新机审：命中禁售词会被拦下（50001），可疑词打回「审核中」。
+ * 原来这里有一份私有实现，只放标题/价格/原价/成色/描述 —— 详情页也要能改的时候
+ * 如果再抄一份，两边字段就会各自漂移（后端 ItemUpdateDTO 其实还支持分类/图片/面交点/可议价）。
  */
 const editVisible = ref(false)
-const editSaving = ref(false)
-const editForm = ref<{
-  id: number
-  title: string
-  price: number,
-  originalPrice: number | undefined
-  description: string
-  conditionLevel: number
-}>({ id: 0, title: '', price: 0, originalPrice: undefined, description: '', conditionLevel: 1 })
+const editTarget = ref<ItemVO | null>(null)
 
 function openEdit(item: ItemVO): void {
-  editForm.value = {
-    id: item.id,
-    title: item.title,
-    price: item.price ?? 0,
-    originalPrice: item.originalPrice ?? undefined,
-    description: item.description ?? '',
-    conditionLevel: item.conditionLevel ?? 1,
-  }
+  editTarget.value = item
   editVisible.value = true
 }
 
-async function submitEdit(): Promise<void> {
-  const form = editForm.value
-  if (!form.title.trim()) {
-    ElMessage.warning('标题不能为空')
-    return
-  }
-  if (!form.price || form.price <= 0) {
-    ElMessage.warning('价格要大于 0')
-    return
-  }
-  if (form.originalPrice && form.originalPrice > 0 && form.originalPrice < form.price) {
-    ElMessage.warning('原价不能低于售价')
-    return
-  }
-  editSaving.value = true
-  try {
-    const result = await updateItem(form.id, {
-      title: form.title.trim(),
-      price: form.price,
-      originalPrice: form.originalPrice,
-      description: form.description,
-      conditionLevel: form.conditionLevel,
-    })
-    ElMessage.success(result.status === 1 ? '已保存，改动需人工复审' : '已保存')
-    editVisible.value = false
-    await loadItems()
-  } catch {
-    // 响应拦截器已提示（禁售词会显示后端文案）
-  } finally {
-    editSaving.value = false
-  }
+/** 保存成功后重新拉列表：状态可能从「在售」变成「审核中」，列表要跟着变 */
+function onEditSaved(): void {
+  void loadItems()
 }
 
 onMounted(loadItems)
@@ -272,38 +230,7 @@ onMounted(loadItems)
       </p>
     </div>
 
-    <el-dialog v-model="editVisible" title="编辑商品" width="520px">
-      <el-form label-width="76px" label-position="left">
-        <el-form-item label="标题">
-          <el-input v-model="editForm.title" maxlength="80" show-word-limit placeholder="同学搜的时候看到的就是它" />
-        </el-form-item>
-        <el-form-item label="售价">
-          <el-input-number v-model="editForm.price" :min="0.01" :max="99999.99" :precision="2" :step="1" />
-          <span class="text-muted" style="margin-left: 8px">改价格对已收藏的同学也立即生效</span>
-        </el-form-item>
-        <el-form-item label="原价">
-          <el-input-number v-model="editForm.originalPrice" :min="0" :max="99999.99" :precision="2" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="成色">
-          <el-select v-model="editForm.conditionLevel" style="width: 100%">
-            <el-option v-for="level in [1, 2, 3, 4, 5]" :key="level" :label="conditionLabel(level)" :value="level" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editForm.description" type="textarea" :rows="4" maxlength="2000" show-word-limit />
-        </el-form-item>
-      </el-form>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="改标题或描述会重新过内容审核：命中禁售词会被直接拦下，可疑词会转人工（商品暂时变成「审核中」）"
-      />
-      <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" :loading="editSaving" @click="submitEdit">保存</el-button>
-      </template>
-    </el-dialog>
+    <ItemEditDialog v-model="editVisible" :item="editTarget" @saved="onEditSaved" />
 
     <div v-if="total > 0" class="my-items__pager">
       <el-pagination

@@ -2,6 +2,8 @@ package com.ershou.campus.module.item.dto;
 
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class ItemQueryDTO {
     private long pageNum = 1;
@@ -18,6 +20,18 @@ public class ItemQueryDTO {
      * 有了精确 id 过滤，地图上的商品小窗一次只取几条。
      */
     private Long preferPointId;
+
+    /**
+     * 一次查**一组**点位（地图上的合并气泡用）。
+     *
+     * <p>为什么要它：地图会把 100 米内的点位合并成一个"N"气泡，点开小窗应该看到
+     * 组内**所有**点位的商品。只按代表点 id 查会少显示 ——
+     * 气泡上写着"3 件"、小窗里只有 1 件（2026-10-11 用户报的就是这个）。
+     *
+     * <p>传参形式是逗号分隔：{@code preferPointIds=11,12,13}（Spring 会自动拆成 List）。
+     * 组本来只有几条，这里再加个上限防止被当成"全表扫描"的口子。
+     */
+    private List<Long> preferPointIds;
     /** latest | price_asc | price_desc */
     private String sort = "latest";
 }

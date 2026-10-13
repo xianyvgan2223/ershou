@@ -176,6 +176,19 @@ public class ItemService {
         if (q.getPreferPointId() != null) {
             w.eq(Item::getPreferPointId, q.getPreferPointId());
         }
+        // 合并点位：地图上"N"个近距离点位合成一个气泡，点开要看**组内全部**商品。
+        //
+        // ⚠️ 2026-10-11 修：以前只按代表点的 id 查，于是气泡上写着"3 件"、
+        // 小窗里却只有 1 件（用户报的就是这个）。这里让接口支持一次查一组点位。
+        // 与 preferPointId 同时传时以集合为准（前者是单点场景的简写）。
+        if (q.getPreferPointIds() != null && !q.getPreferPointIds().isEmpty()) {
+            // 上限 50：组本来只有几条，设个上限免得这个参数被拿来当"全表扫描"的口子。
+            // 超了不报错，截断即可 —— 地图小窗最多显示十几条，多出来的查了也没用。
+            List<Long> ids = q.getPreferPointIds().stream().filter(Objects::nonNull).distinct().limit(50).toList();
+            if (!ids.isEmpty()) {
+                w.in(Item::getPreferPointId, ids);
+            }
+        }
         switch (q.getSort() == null ? "latest" : q.getSort()) {
             case "price_asc" -> w.orderByAsc(Item::getPrice);
             case "price_desc" -> w.orderByDesc(Item::getPrice);

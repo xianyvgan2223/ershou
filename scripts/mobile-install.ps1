@@ -70,7 +70,10 @@ if (-not (Test-Path $apk)) {
   Write-Host '去掉 -SkipBuild 重新构建试试。' -ForegroundColor Yellow
   exit 1
 }
-Write-Host ("APK: " + $apk + "  (" + [math]::Round((Get-Item $apk).Length / 1MB, 1) + " MB)") -ForegroundColor DarkGray
+# 打印构建时间：只说"改完代码"不够 —— 用户看到的可能是旧包
+# （踩过：后端重启了、代码也改了，却忘了重新构建 APK，用户反馈"还是老样子"）
+$apkInfo = Get-Item $apk
+Write-Host ("APK: " + $apk + "  (" + [math]::Round($apkInfo.Length / 1MB, 1) + " MB，构建于 " + $apkInfo.LastWriteTime.ToString('MM-dd HH:mm:ss') + ")") -ForegroundColor DarkGray
 
 # ---------- 2. 记录安装前有没有登录态（装完对比，用来确认没清数据） ----------
 function Read-Token {

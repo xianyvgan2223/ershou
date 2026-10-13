@@ -10,9 +10,11 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/providers.dart';
 import '../../core/utils/coord.dart';
 import '../../core/utils/point_merge.dart';
+import '../../data/api_repository2.dart' show AmapKeyState;
 import '../../data/models.dart';
 import '../../data/models2.dart';
 import '../theme/app_theme.dart';
+import '../widgets/map_nearby_window.dart';
 import '../widgets/map_point_items_window.dart';
 import '../widgets/common.dart';
 import 'items_by_point_page.dart';
@@ -53,6 +55,9 @@ class _MapPageState extends ConsumerState<MapPage> {
   /// 后端没配高德 key 时退回自绘底图
   bool _amapReady = false;
 
+  /// 为什么画不出地图：区分"没配 key"与"连不上后端"（两者给用户的提示完全不同）
+  AmapKeyState _keyState = AmapKeyState.unreachable;
+
   /// 选中点位的在售商品（地图上的商品小窗）。
   ///
   /// 为什么按点位 id 精确查而不是"拉一批再按名称过滤"：
@@ -62,10 +67,25 @@ class _MapPageState extends ConsumerState<MapPage> {
   /// 小窗当前展示的点位 id：切点位时旧商品不能先闪一下再换
   int? _pointItemsFor;
 
+  /// 「我附近」窗口是否收起。默认展开；用户收起后**记到本地**，下次进地图还是收起的。
+  bool _nearbyCollapsed = false;
+  static const String _nearbyCollapsedKey = 'map.nearby.collapsed';
+
   @override
   void initState() {
     super.initState();
+    // 先读回上次的折叠状态，再拉数据：避免"展开着闪一下再收起"
+    _nearbyCollapsed =
+        ref.read(localStoreProvider).uiFlag(_nearbyCollapsedKey);
     WidgetsBinding.instance.addPostFrameCallback((_) => _boot());
+  }
+
+  /// 折叠/展开「我附近」，并落盘（写失败不影响使用）
+  void _toggleNearby() {
+    setState(() => _nearbyCollapsed = !_nearbyCollapsed);
+    unawaited(ref
+        .read(localStoreProvider)
+        .setUiFlag(_nearbyCollapsedKey, _nearbyCollapsed));
   }
 
   @override
@@ -94,15 +114,39 @@ class _MapPageState extends ConsumerState<MapPage> {
     ));
   }
 
+  /// 画不出地图时，按**真实原因**给提示。
+  ///
+  /// ⚠️ 2026-10-10 修：以前不管什么原因都显示"后端还没配置高德 key"，
+  /// 而实际上最常见的原因是**手机连不上后端**（不同网段 / 地址过期 / 后端刚重启）。
+  /// 那句文案把用户和开发者都带偏了 —— 后端明明配好了 key，却让人去 .env 里折腾。
+  String _notReadyHint(AmapKeyState state) {
+    switch (state) {
+      case AmapKeyState.missingKey:
+        return '后端还没配置高德 key，暂时无法显示真实地图。\n'
+            '在后端 .env 里补 AMAP_JS_KEY 后回来刷新即可。';
+      case AmapKeyState.unreachable:
+        return '连不上后端，地图暂时打不开。\n'
+            '请确认：后端已启动、App 里的服务器地址正确。\n'
+            '（USB 调试时可在电脑上跑 scripts/mobile-connect.ps1 建隧道）';
+      case AmapKeyState.configured:
+        // 理论上不会走到这里（configured 时不会显示这张卡片）
+        return '地图加载中…';
+    }
+  }
+
   Future<void> _boot() async {
     setState(() {
       _checking = true;
       _error = null;
     });
     final repo = ref.read(mapRepositoryProvider);
-    final ready = await repo.amapConfigured();
+    // 三态而不是布尔：见 MapRepository.amapKeyState 的说明 ——
+    // 原来的 `catch (_) { return false; }` 会把"连不上后端"也报成"没配 key"，
+    // 用户照着那句提示去 .env 里折腾 key，而真正的问题是网络不通。
+    final keyState = await repo.amapKeyState();
     if (!mounted) return;
-    if (!ready) {
+    _keyState = keyState;
+    if (keyState != AmapKeyState.configured) {
       setState(() {
         _amapReady = false;
         _checking = false;
@@ -277,9 +321,14 @@ class _MapPageState extends ConsumerState<MapPage> {
       _pointItems = const [];
     });
     try {
+      // 合并气泡要查**组内所有点位**的商品，不能只查代表点 ——
+      // 否则气泡上写着"3 件"、小窗里只有 1 件（2026-10-11 用户报的就是这个）。
+      // 口径由 PointGroup.itemQueryPointIds() 统一提供，有单元测试钉着。
+      final group = _selectedGroup;
+      final pointIds = group != null ? group.itemQueryPointIds() : <int>[p.id];
       final page = await ref
           .read(itemRepositoryProvider)
-          .page(pageSize: 12, preferPointId: p.id);
+          .page(pageSize: 12, preferPointIds: pointIds);
       if (!mounted || _pointItemsFor != p.id) return; // 已经切走了，丢弃这次结果
       setState(() {
         _pointItems = page.records.where((i) => i.onSale).toList();
@@ -408,8 +457,7 @@ class _MapPageState extends ConsumerState<MapPage> {
               : !_amapReady
                   ? EmptyState(
                       icon: Icons.map_outlined,
-                      message: '后端还没配置高德 key，暂时无法显示真实地图。\n'
-                          '配置 ershou.amap.js-key 后回来刷新即可。',
+                      message: _notReadyHint(_keyState),
                       onRetry: _boot,
                     )
                   : _mapStack(),
@@ -485,66 +533,21 @@ class _MapPageState extends ConsumerState<MapPage> {
     return WebViewWidget(controller: controller);
   }
 
-  /// 附近点位：极简竖直列表，点一个即在地图上居中点亮
+  /// 附近点位窗口（实现抽到 [MapNearbyWindow]，这样折叠交互能被 widget 测试直接覆盖）。
+  ///
+  /// 折叠状态在这里持有并落盘：用户收起来就是不想看，重进地图不该又弹开。
+  /// 高度上限与收起态胶囊的样式都在那个组件里，改样式不会牵动这里。
   Widget _nearbyColumn() {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 168),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: AppTheme.softShadow,
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(8, 2, 8, 4),
-            child: Text('我附近',
-                style: TextStyle(fontSize: 10.5, color: AppColors.inkFaint, fontWeight: FontWeight.w600)),
-          ),
-          Flexible(
-            child: ListView.builder(
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              itemCount: _nearby.length,
-              itemBuilder: (context, i) {
-                final n = _nearby[i];
-                final dist = n.distanceMeters < 1000
-                    ? '${n.distanceMeters.round()}m'
-                    : '${(n.distanceMeters / 1000).toStringAsFixed(1)}km';
-                return InkWell(
-                  onTap: () {
-                    final hit = _data.points.where((p) => p.id == n.id).toList();
-                    if (hit.isEmpty) return;
-                    setState(() => _selected = hit.first);
-                    _centerOn(hit.first);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            n.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12, color: AppColors.ink),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(dist,
-                            style: const TextStyle(fontSize: 10.5, color: AppColors.brandDark)),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+    return MapNearbyWindow(
+      points: _nearby,
+      collapsed: _nearbyCollapsed,
+      onToggle: _toggleNearby,
+      onPick: (n) {
+        final hit = _data.points.where((p) => p.id == n.id).toList();
+        if (hit.isEmpty) return;
+        setState(() => _selected = hit.first);
+        _centerOn(hit.first);
+      },
     );
   }
 

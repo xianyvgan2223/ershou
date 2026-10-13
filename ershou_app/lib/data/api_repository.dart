@@ -58,6 +58,9 @@ class ItemRepository {
     String? sort,
     /// 按面交点精确筛选（地图上点一个交易点 → 看这个点位的商品）
     int? preferPointId,
+    /// 一次查**一组**点位：地图上合并气泡（"3"）组内所有点位的商品。
+    /// 与 preferPointId 二选一；都传时后端以集合为准。
+    List<int>? preferPointIds,
   }) async {
     final raw = await pageRaw(
       pageNum: pageNum,
@@ -66,6 +69,7 @@ class ItemRepository {
       categoryId: categoryId,
       sort: sort,
       preferPointId: preferPointId,
+      preferPointIds: preferPointIds,
     );
     if (raw == null) {
       return const PageResult<Item>(total: 0, pageNum: 1, pageSize: 20, records: []);
@@ -82,6 +86,7 @@ class ItemRepository {
     int? categoryId,
     String? sort,
     int? preferPointId,
+    List<int>? preferPointIds,
   }) async {
     final env = await _api.envelope<Map<String, dynamic>>(
       () => _api.dio.get<dynamic>('/items', queryParameters: {
@@ -91,6 +96,9 @@ class ItemRepository {
         if (categoryId != null) 'categoryId': categoryId,
         if (sort != null && sort.isNotEmpty) 'sort': sort,
         if (preferPointId != null) 'preferPointId': preferPointId,
+        // 后端用 List<Long> 接，逗号分隔即可（组内通常 2~3 个）
+        if (preferPointIds != null && preferPointIds.isNotEmpty)
+          'preferPointIds': preferPointIds.join(','),
       }),
       parse: (data) => (data as Map).cast<String, dynamic>(),
     );

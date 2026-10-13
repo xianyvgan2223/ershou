@@ -35,8 +35,17 @@ class PointGroup {
     return prices.isEmpty ? 0 : prices.reduce(math.min);
   }
 
-  /// 组内所有真实点位 id（点这个气泡时按这些 id 查商品）
+  /// 组内所有真实点位 id
   List<int> get ids => members.map((p) => p.id).toList();
+
+  /// 点这个气泡时该查哪些点位的商品。
+  ///
+  /// ⚠️ 关键约定（2026-10-11 用户报的 bug 就出在这里）：
+  /// 合并气泡（上面写着"3"）必须查**组内全部**点位，不能只查代表点 ——
+  /// 只查代表点的话，气泡说 3 件、小窗里却只有 1 件。
+  /// 抽成方法而不是在页面里写三元表达式，是为了让这条口径能被单元测试直接钉住
+  /// （写在页面里太容易被改回去，而且改回去不会有任何报错）。
+  List<int> itemQueryPointIds() => members.length > 1 ? ids : <int>[rep.id];
 
   /// 名称：合并时加个后缀，让人知道这里其实有多个点位
   String get name => merged ? '${rep.name}（${members.length} 个点位）' : rep.name;

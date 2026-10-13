@@ -305,13 +305,16 @@ public class ItemIndexService {
         // 显式 refresh：bulk 写入后索引默认要等约 1 秒才可见。
         // 不刷新的话，"重建完成"返回时 count / 搜索还是旧值（实测刚返回时 _count = 0），
         // 管理员点完重建看到 docCount=0 会以为重建失败 —— 其实是还没刷新。
-        long visible = refreshAndCount();
-        log.info("[search][es] 全量重建完成：{} 件（analyzer={}，刷新后可见 {} 条）", indexed, analyzer, visible);
+        long docCount = refreshAndCount();
+        long visible = refreshAndCountOnSale();
+        log.info("[search][es] 全量重建完成：{} 件（analyzer={}，索引文档 {} 条，其中在售可见 {} 条）",
+                indexed, analyzer, docCount, visible);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("indexName", props.getIndexName());
         result.put("analyzer", analyzer);
         result.put("indexed", indexed);
         result.put("visible", visible);
+        result.put("docCount", docCount);
         result.put("rebuilt", true); // 标记这次是清空重建（调用方可据此判断幽灵文档已清掉）
         return result;
     }
@@ -330,6 +333,31 @@ public class ItemIndexService {
         try {
             return client.count(c -> c.index(props.getIndexName())).count();
         } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * 刷新后统计**在售**（status=2）文档数 —— 也就是公开检索实际能看到多少条。
+     *
+     * <p>为什么必须和 {@link #refreshAndCount()} 分开：索引里存**所有状态**的商品
+     * （设计如此：状态流转只 upsert、不删文档，公开检索固定过滤 status=2），
+     * 所以"索引文档数"天然大于"用户能看到几件"。
+     *
+     * <p>2026-10-10 踩过：接口只报 total，重建完显示 12 条、搜索却只有 10 条，
+     * 看着像丢了数据 —— 其实 2 条是已过期的。管理员判断"重建有没有生效"该看这个数，
+     * 它和搜索页的 total 完全一致。
+     */
+    private long refreshAndCountOnSale() {
+        ElasticsearchClient client = es.client();
+        if (client == null) {
+            return -1;
+        }
+        try {
+            return client.count(c -> c.index(props.getIndexName())
+                    .query(q -> q.term(t -> t.field("status").value(2)))).count();
+        } catch (Exception e) {
+            log.warn("[search][es] 统计在售文档数失败：{}", e.getMessage());
             return -1;
         }
     }

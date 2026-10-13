@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -549,7 +549,31 @@ class ItemFeedNotifier extends Notifier<ItemFeedState> {
   /// 请求序号：快速切分类/连点搜索时，旧响应回来不能覆盖新列表。
   int _seq = 0;
 
+  /// 上次**成功**拉到第一页的时间。
+  ///
+  /// 为什么要它（2026-10-11 用户反馈："主页如果不刷新就不会同步显示"）：
+  /// 首页在 IndexedStack 里保活，`initState` 只跑一次；从商品详情返回、
+  /// 或切到别的 Tab 再切回来都不会重新请求 —— 于是别处（比如网页端改了商品）
+  /// 的改动在主页上"不刷新就看不到"。
+  DateTime? _lastLoadedAt;
+
+  /// 新鲜期：这段时间内"变可见"不重复请求（避免切 Tab 来回就打一次后端）
+  static const _staleAfter = Duration(seconds: 25);
+
   ItemRepository get _repo => ref.read(itemRepositoryProvider);
+
+  /// 数据可能已变（本机改了商品 / 刚发布完）→ 下次"变可见"时强制补拉
+  void invalidate() => _lastLoadedAt = null;
+
+  /// 变可见时的按需补拉：还新鲜就完全不动（不闪 loading、不打断阅读位置）。
+  ///
+  /// 调用点：切回「首页」Tab、App 从后台回到前台。
+  Future<void> refreshIfStale() async {
+    if (state.loading) return;
+    final at = _lastLoadedAt;
+    if (at != null && ref.read(nowProvider)().difference(at) < _staleAfter) return;
+    await refresh();
+  }
 
   Future<void> loadCategoriesIfNeeded() async {
     if (state.categories.isNotEmpty) return;
@@ -604,6 +628,8 @@ class ItemFeedNotifier extends Notifier<ItemFeedState> {
         pageNum: 1,
         loadingMore: false,
       );
+      // 只有真拿到响应才记时间：失败时保持"陈旧"，下次变可见会再试
+      _lastLoadedAt = ref.read(nowProvider)();
       // 只在"默认视图"（无搜索、无分类、按最新）缓存第一页，否则会把搜索结果当首页贴出来
       if (raw != null &&
           state.keyword.isEmpty &&
@@ -676,3 +702,8 @@ class ItemFeedNotifier extends Notifier<ItemFeedState> {
     await refresh();
   }
 }
+
+/// 当前时间。抽成 provider 的唯一目的是**让"新鲜期"这类逻辑可测**：
+/// 测试里覆盖成假时钟就能直接验证"过期后才会补拉"，不必真的等 25 秒。
+/// 生产环境就是 `DateTime.now`，没有任何额外开销。
+final nowProvider = Provider<DateTime Function()>((ref) => DateTime.now);

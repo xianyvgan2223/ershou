@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,24 +51,73 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor,
 
     private static final String PROPERTY_SOURCE_NAME = "dotenvFile";
 
-    /** {@code .env} 在项目根目录，即后端模块的上一级 */
-    private static final Path ENV_FILE = Paths.get("..", ".env").toAbsolutePath().normalize();
+    /**
+     * 候选路径：**不能只认一个**。
+     *
+     * <p>踩过的坑（2026-10-10）：最初只认"当前工作目录的上一级"（`../.env`）。
+     * 从 `scripts/dev-server.ps1` 启动时工作目录是 {@code ershou-server}，能找到；
+     * 但**从 IDEA 直接 Run 时找不到**（IDEA 的工作目录可以是项目根、也可以是别的），
+     * 于是 key 又是空的、移动端地图又打不开 —— 表现和"根本没配 key"一模一样。
+     * 所以按"最可能 → 次可能"列一串候选，逐个试到存在为止。
+     */
+    private static List<Path> candidateEnvFiles() {
+        List<Path> candidates = new ArrayList<>();
+        Path explicit = pathFromEnv("ERSHOU_ENV_FILE");
+        if (explicit != null) {
+            candidates.add(explicit);
+        }
+        Path root = pathFromEnv("ERSHOU_ROOT");
+        if (root != null) {
+            candidates.add(root.resolve(".env"));
+        }
+        Path base = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+        // 工作目录 = 项目根 / ershou-server / 更深的子目录，三种都覆盖
+        candidates.add(base.resolve(".env"));
+        candidates.add(base.resolve("..").resolve(".env").normalize());
+        candidates.add(base.resolve("..").resolve("..").resolve(".env").normalize());
+        return candidates;
+    }
+
+    private static Path pathFromEnv(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return Paths.get(value.trim()).toAbsolutePath().normalize();
+    }
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        Map<String, Object> values = readDotenv(ENV_FILE);
-        if (values.isEmpty()) {
-            // 用 System.err 而不是 logger：这一步可能早于日志系统初始化
-            System.err.println("[dotenv] 未读到 " + ENV_FILE + "（跳过；若依赖 .env 里的 key，请确认文件存在）");
+        List<String> tried = new ArrayList<>();
+        Map<String, Object> values = Map.of();
+        Path found = null;
+        for (Path candidate : candidateEnvFiles()) {
+            tried.add(candidate.toString());
+            if (!Files.isRegularFile(candidate)) {
+                continue;
+            }
+            Map<String, Object> parsed = readDotenv(candidate);
+            if (!parsed.isEmpty()) {
+                values = parsed;
+                found = candidate;
+                break;
+            }
+        }
+
+        if (found == null) {
+            // 找不到就把"找过哪些路径"打出来 —— 否则用户只看到"未配置 key"，
+            // 分不清是路径没对上还是文件里真的没写（这个坑排查过一次，别再让它难查）
+            System.err.println("[dotenv] 没找到可用的 .env，已尝试：" + String.join("  |  ", tried));
+            System.err.println("[dotenv] 可用环境变量 ERSHOU_ENV_FILE 直接指定 .env 的绝对路径");
             return;
         }
+
         MutablePropertySources sources = environment.getPropertySources();
-        // 允许显式关闭（例如部署时确实想只用真实环境变量）
         if (sources.contains(PROPERTY_SOURCE_NAME)) {
             sources.remove(PROPERTY_SOURCE_NAME);
         }
         sources.addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, values));
-        System.out.println("[dotenv] 已从 " + ENV_FILE + " 载入 " + values.size() + " 个变量");
+        System.out.println("[dotenv] 已从 " + found + " 载入 " + values.size() + " 个变量");
     }
 
     /** 解析 {@code .env}：忽略空行与整行注释，去掉可能的内联注释与 BOM */

@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ChatDotRound,
   Delete,
+  Edit,
   Location,
   ShoppingCart,
   Star,
@@ -19,6 +20,7 @@ import { openChatSession } from '@/api/chat'
 import { fetchMeetupOrders } from '@/api/order'
 import type { OrderVO } from '@/api/order'
 import MeetupBookingDialog from '@/components/MeetupBookingDialog.vue'
+import ItemEditDialog from '@/components/ItemEditDialog.vue'
 import { useAuthGuard } from '@/composables/useAuthGuard'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
@@ -128,6 +130,30 @@ const OFFLINEABLE_STATUS = [1, 2, 3, 6]
 const offlineable = computed(
   () => !!item.value && OFFLINEABLE_STATUS.includes(item.value.status as number),
 )
+
+/**
+ * 可编辑：卖家自己的商品，**除了「已售出」都能改**。
+ *
+ * 口径与后端 ItemService.update 严格对齐 —— 那里只拦一种：
+ *   `if (item.getStatus() == 4) throw ITEM_SOLD("商品已售出，不能再改价格和标题")`
+ * 所以这里也只排除 4（已售出）。其余状态（含 8 违规下架）后端都放行，
+ * 前端就别自作主张藏按钮 —— 藏了用户只会以为"这功能没了"。
+ *
+ * ⚠️ 一开始写成白名单 `[1,2,3,5,6,7]` 是错的：既漏了 0(草稿)/8(违规下架)，
+ * 又没排除**已售出**（我误以为 5 是已售出），结果已售出的商品还能点「修改商品」、
+ * 点下去才被后端拒绝。验收脚本的 F 组断言就是这么抓出来的。
+ */
+const SOLD_STATUS = 4
+const editable = computed(
+  () => isOwner.value && !!item.value && item.value.status !== SOLD_STATUS,
+)
+
+/** 编辑弹窗：卖家在自己商品的详情页直接改，不必绕回「我的发布」 */
+const editVisible = ref(false)
+/** 保存后重新拉详情：标题/价格/状态（可能变成「审核中」）都要跟着变 */
+function onItemSaved(): void {
+  void loadItem()
+}
 
 /** 卖家下架自己的商品（从商品详情页直接操作，不用绕回「我的发布」） */
 const offlineLoading = ref(false)
@@ -377,6 +403,16 @@ onMounted(async () => {
               <span>{{ favorited ? '已收藏' : '收藏' }}</span>
             </button>
 
+            <!-- 卖家：直接在自己商品的详情页修改（不用绕回「我的发布」） -->
+            <el-button
+              v-if="editable"
+              size="large"
+              :icon="Edit"
+              @click="editVisible = true"
+            >
+              修改商品
+            </el-button>
+
             <!-- 卖家：直接在自己商品的详情页下架（不用绕回「我的发布」） -->
             <el-button
               v-if="isOwner && offlineable"
@@ -456,6 +492,8 @@ onMounted(async () => {
       <p class="empty-state__desc">它可能已经被别的同学带走啦</p>
       <el-button class="empty-state__btn" round @click="router.push('/')">回到首页</el-button>
     </div>
+
+    <ItemEditDialog v-model="editVisible" :item="item" @saved="onItemSaved" />
 
     <MeetupBookingDialog
       v-if="item"

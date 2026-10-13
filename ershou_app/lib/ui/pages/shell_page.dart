@@ -33,7 +33,12 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       MaterialPageRoute<bool>(builder: (_) => const PublishPage()),
     );
     if (published == true && mounted) {
-      ref.read(itemFeedProvider.notifier).refresh();
+      // 刚发布/刚改过：先让"新鲜期"失效，再补拉，确保首页立刻反映这次改动。
+      // （只 refresh 也能拿到新数据，但 invalidate 顺手把时间戳重置，
+      //   之后紧接着切回首页 Tab 不会再多打一次请求。）
+      final feed = ref.read(itemFeedProvider.notifier);
+      feed.invalidate();
+      await feed.refreshIfStale();
     }
   }
 

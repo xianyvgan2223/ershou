@@ -51,6 +51,12 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 切回「首页」Tab 时按需补拉：首页在 IndexedStack 里保活，initState 只跑一次，
+    // 否则别处（网页端改商品、本机发布）的改动"不手动刷新就看不到"。
+    // refreshIfStale 在数据还新鲜时什么都不做，所以切 Tab 不会每次都打后端。
+    ref.listen<int>(navIndexProvider, (prev, next) {
+      if (next == 0) ref.read(itemFeedProvider.notifier).refreshIfStale();
+    });
     final state = ref.watch(itemFeedProvider);
     final user = ref.watch(authProvider).user;
     return Scaffold(
