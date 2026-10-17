@@ -213,27 +213,46 @@ public class ItemService {
      * 商品详情：先读 Redis 缓存（含空值缓存防穿透），未命中才回源 DB 并回填。
      * 浏览量不再同步 UPDATE（热点行锁 + 每次都刷 updated_at 会连累 ES 增量同步），
      * 改为 Redis 计数、定时批量回写（见 ScheduledTasks.flushViewCounts）。
+     *
+     * <p><b>为什么要走 {@code getOrLoad} 而不是手工 get/set（2026-10-10 改）</b>：
+     * 这是全站最热的读接口，缓存一失效就是一次**典型击穿**。
+     * 旧实现是"未命中 → 直接查库 → 回填"，**没有任何互斥**：
+     * 实测删掉缓存后 50 并发同时打，产生约 50 次回源查询、每个请求都走慢路径、P95 ≈ 500ms。
+     * 走 getOrLoad 后由重建锁保证**只有一个请求回源**，其余等待并读缓存。
+     *
+     * <p>两层 key 的分工保持不变：
+     * <ul>
+     *   <li>{@code item:detail:{id}} —— 正常数据；</li>
+     *   <li>{@code item:null:{id}} —— 空值哨兵。它的作用是**先于 getOrLoad 拦截**：
+     *       如果一个不存在的 id 已经被标记过，就直接抛"不存在"，连重建锁都不用抢
+     *       （否则每个不存在的 id 都要抢一次锁，反而更重）。</li>
+     * </ul>
+     * loader 里遇到"库里也没有"时**自己写空值哨兵**再抛业务异常 —— getOrLoad 会原样抛出去，
+     * 但哨兵已经落下，后续请求在第 2 步就被拦住，不会真的把重建锁占满 5 秒。
      */
     public ItemVO detail(Long id, Long userId) {
-        JsonCache.Hit<ItemVO> hit = cache.get(RedisKeys.itemDetail(id), ITEM_VO);
-        // 空值缓存命中 → 直接按"不存在"处理，不查库（防穿透）
-        if ((hit.hit() && hit.value() == null) || (!hit.hit() && cache.isNullCached(RedisKeys.itemNull(id)))) {
+        String detailKey = RedisKeys.itemDetail(id);
+        String nullKey = RedisKeys.itemNull(id);
+        // 空值缓存命中 → 直接按"不存在"处理，不查库（防穿透的第一道，也是最便宜的一道）
+        if (cache.isNullCached(nullKey)) {
             throw new BizException(ResultCode.ITEM_NOT_FOUND);
         }
-        ItemVO vo;
-        if (hit.hit()) {
-            vo = hit.value();
-        } else {
+
+        ItemVO vo = cache.getOrLoad(detailKey, cacheProps.getItemDetailTtl(), ITEM_VO, () -> {
             Item item = itemMapper.selectById(id);
             if (item == null) {
-                cache.setNull(RedisKeys.itemNull(id), cacheProps.getNullValueTtl());
+                cache.setNull(nullKey, cacheProps.getNullValueTtl());
                 throw new BizException(ResultCode.ITEM_NOT_FOUND);
             }
-            vo = toVO(item);
-            vo.setDescription(item.getDescription());
-            // 先落缓存再叠加浏览量：缓存里存的是"库里的值"，用户维度的 favorited 不入缓存
-            cache.set(RedisKeys.itemDetail(id), vo, cacheProps.getItemDetailTtl());
-        }
+            ItemVO fresh = toVO(item);
+            fresh.setDescription(item.getDescription());
+            return fresh;
+        });
+
+        // ⚠️ 下面两处是**就地修改** vo。命中缓存时 vo 是本次反序列化出来的副本，
+        // 且这两行之后**不再回写缓存**，所以不会污染 Redis。
+        // 谁要是以后在这里加了 `cache.set(...)` 回写，就会把"某个用户的 favorited=true"
+        // 和"叠了浏览量的 viewCount"写进共享缓存，变成所有人可见的脏数据 —— 千万别加。
         int pending = pendingViews(id);
         if (pending > 0) {
             vo.setViewCount((vo.getViewCount() == null ? 0 : vo.getViewCount()) + pending);
