@@ -90,6 +90,7 @@ class Item {
     this.expireAt = '',
     this.seller,
     this.highlightTitle,
+    this.sellerType = 1,
   });
 
   final int id;
@@ -121,6 +122,13 @@ class Item {
   final String expireAt;
   final Seller? seller;
   final String? highlightTitle;
+
+  /// 卖家类型：1 个人卖家 / 2 平台官方严选（第 4 轮新增，默认 1 兼容旧数据）。
+  /// 平台商品在 App 端显示金色「官方代卖」角标 + 卖家行「官方严选」。
+  final int sellerType;
+
+  /// 是否平台官方严选商品
+  bool get isOfficial => sellerType == 2;
 
   /// 后端 status=2 且 statusText="在售"（已用真实接口核对）；用文案判断最稳，避免猜错枚举。
   bool get onSale => statusText == '在售' || (statusText.isEmpty && status == 2);
@@ -171,6 +179,7 @@ class Item {
             ? Seller.fromJson((json['seller'] as Map).cast<String, dynamic>())
             : null,
         highlightTitle: json['highlightTitle'] as String?,
+        sellerType: (json['sellerType'] as num?)?.toInt() ?? 1,
       );
 
   /// 只用于局部更新（目前只有收藏态），其余字段原样带过来。
@@ -202,6 +211,7 @@ class Item {
         expireAt: expireAt,
         seller: seller,
         highlightTitle: highlightTitle,
+        sellerType: sellerType,
       );
 
   static double _toDouble(Object? v) {

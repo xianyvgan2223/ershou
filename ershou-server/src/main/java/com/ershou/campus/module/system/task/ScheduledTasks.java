@@ -127,6 +127,12 @@ public class ScheduledTasks {
     @Scheduled(cron = "${ershou.item.expire-cron:0 30 * * * ?}")
     @Transactional(rollbackFor = Exception.class)
     public void expireItems() {
+        // 开发/演示期应急开关（ershou.item.validity-enabled=false）：整体跳过到期下架。
+        // 放在最前面：不查库、不改状态、不作废挂单；log.debug 在 dev profile 下（com.ershou.campus=debug）可见。
+        if (!itemService.isValidityEnabled()) {
+            log.debug("[task][expire-item] 商品限时已关闭（ershou.item.validity-enabled=false），跳过本轮");
+            return;
+        }
         List<Item> expired = itemMapper.selectList(Wrappers.<Item>lambdaQuery()
                 .in(Item::getStatus, EXPIRABLE_ITEM_STATUS)
                 .isNotNull(Item::getExpireAt)

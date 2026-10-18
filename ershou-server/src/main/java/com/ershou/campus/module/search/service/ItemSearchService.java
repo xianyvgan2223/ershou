@@ -22,6 +22,9 @@ import java.util.Map;
  * 商品关键词检索（Elasticsearch）。
  *
  * <p>只负责产出"命中 id + 总数 + 高亮"，商品字段仍回 MySQL 取最新值，避免索引与库字段漂移。
+ * <b>平台代卖标注（sellerType / platformPointId）也走这条回库路径</b>：本类不产出 VO 字段，
+ * 由 {@code ItemService.searchViaEs} 回库后交给 {@code ItemService#toVOList} 统一组装，
+ * 所以关键词搜索与普通列表的标注口径完全一致（索引里的 sellerType 只作为文档留存，不参与检索）。
  * 查询走底层 RestClient + 手写 JSON DSL：DSL 由服务端语义校验，
  * 不受 ES Java 客户端强类型模型（例如 sort 不接受 \"desc" 简写）的版本约束。
  */

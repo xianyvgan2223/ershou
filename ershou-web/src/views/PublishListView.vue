@@ -173,7 +173,7 @@ onMounted(loadItems)
             </p>
             <!-- 有效期倒计时：只在对"还在卖"的商品上有意义（已售出/下架/过期都不提醒） -->
             <p
-              v-if="showExpire(item)"
+              v-if="showExpire(item) && item.expireAt"
               class="my-items__expire"
               :class="{ 'is-urgent': expireUrgent(item.expireAt) }"
             >

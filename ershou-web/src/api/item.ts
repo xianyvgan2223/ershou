@@ -42,6 +42,18 @@ export interface ItemVO {
   highlightDescription?: string | null
   /** 仅详情接口返回 */
   preferPoint?: TradePoint | null
+  /**
+   * 卖家类型：1 个人 / 2 平台（官方严选代卖）。
+   *
+   * 后端 `item.seller_type`（第 2 轮平台代卖新增列）。缺省按 1 处理，
+   * 老接口/老数据没有这个字段时卡片不显示「官方代卖」角标。
+   */
+  sellerType?: 1 | 2
+  /**
+   * 平台代卖点 id（仅 `sellerType=2` 有值），对应 `item.platform_point_id`。
+   * 与个人商品的 `preferPointId` 是两套字段，互不复用。
+   */
+  platformPointId?: number | null
 }
 
 /** GET /items 查询参数 */

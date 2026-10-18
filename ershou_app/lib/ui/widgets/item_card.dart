@@ -81,6 +81,7 @@ class _ItemCardState extends ConsumerState<ItemCard> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final sold = !item.onSale;
+    final official = item.isOfficial;
     // 星星放在卡片的 Stack 外层（而不是嵌进卡片的 InkWell 里），
     // 免得两个手势识别器抢同一个点击：以前点星星边缘会穿透到卡片上跳详情页。
     return Stack(
@@ -115,7 +116,7 @@ class _ItemCardState extends ConsumerState<ItemCard> {
                       ),
                     ),
                   ),
-                if (item.negotiable == 1 && !sold)
+                if (item.negotiable == 1 && !sold && !official)
                   const Positioned(
                     left: 7,
                     top: 7,
@@ -123,6 +124,17 @@ class _ItemCardState extends ConsumerState<ItemCard> {
                       text: '可议价',
                       color: Colors.white,
                       background: Color(0xCC00B578),
+                    ),
+                  ),
+                // 平台官方严选：封面左上角金色「官方代卖」角标（第 4 轮）
+                if (official && !sold)
+                  const Positioned(
+                    left: 7,
+                    top: 7,
+                    child: TagChip(
+                      text: '官方代卖',
+                      color: Color(0xFF7A4E00),
+                      background: Color(0xFFF7D08A),
                     ),
                   ),
               ],
@@ -168,27 +180,44 @@ class _ItemCardState extends ConsumerState<ItemCard> {
                   Row(
                     children: [
                       Expanded(
-                        child: Row(
-                          children: [
-                            Avatar(
-                              url: item.seller?.avatar,
-                              name: item.seller?.nickname,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 5),
-                            Flexible(
-                              child: Text(
-                                item.seller?.nickname ?? '匿名',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.inkFaint,
-                                ),
+                        child: official
+                            // 平台严选：卖家行显示「官方严选」+ 认证小图标
+                            ? const Row(
+                                children: [
+                                  Icon(Icons.verified_rounded,
+                                      size: 13, color: Color(0xFFE0A100)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '官方严选',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFFB27A00),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Row(
+                                children: [
+                                  Avatar(
+                                    url: item.seller?.avatar,
+                                    name: item.seller?.nickname,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: Text(
+                                      item.seller?.nickname ?? '匿名',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.inkFaint,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
-                        ),
                       ),
                       const Icon(Icons.visibility_outlined,
                           size: 12, color: AppColors.inkFaint),

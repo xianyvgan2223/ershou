@@ -75,6 +75,16 @@ ershou:
     dict-ttl: 1h
     dashboard-ttl: 30s
     view-flush-cron: "0 */10 * * * ?"
+  # 商品有效期与限时下架（第 4 轮新增显式配置；默认值 = 原来的 7 天行为，生产不受影响）
+  # 开发/演示期商品太少时：在 .env 里设 ITEM_VALIDITY_ENABLED=false 即可整体关闭限时
+  # （发布/重新上架不写 expire_at，到期任务跳过），无需改代码。
+  item:
+    # 商品有效期（天）：发布 / 重新上架时写入 expire_at = now + valid-days
+    valid-days: ${ITEM_VALID_DAYS:7}
+    # 商品限时总开关：false 时发布/重新上架**不写 expire_at（NULL = 永久有效）**，到期任务跳过
+    validity-enabled: ${ITEM_VALIDITY_ENABLED:true}
+    # 过期任务 cron（默认每小时 :30）；开发期想验证任务可临时改 */10 * * * * ?
+    expire-cron: "${ITEM_EXPIRE_CRON:0 30 * * * ?}"
   crypto:
     # 手机号 AES 密钥（16 位）。生产环境必须换成随机值并用环境变量注入
     phone-key: ${PHONE_AES_KEY:__REDACTED_PHONE_KEY__}

@@ -100,6 +100,24 @@ public class ItemService {
         return validDays;
     }
 
+    /**
+     * 商品限时总开关（开发/演示期可关闭，默认 {@code true} = 原来的 7 天限时行为）。
+     *
+     * <p>关闭（{@code false}）时只影响两件事：
+     * <ul>
+     *   <li>发布 / 重新上架**不写过期时间**（{@code expire_at = NULL}，等同永久有效）；</li>
+     *   <li>到期任务 {@code ScheduledTasks#expireItems()} 直接跳过，不做任何到期下架。</li>
+     * </ul>
+     * 审核、发布限额、锁库、状态机等其它逻辑一律不受影响。
+     */
+    @Value("${ershou.item.validity-enabled:true}")
+    private boolean validityEnabled = true;
+
+    /** 商品限时是否启用（给定时任务 {@code ScheduledTasks#expireItems()} 判断是否跳过） */
+    public boolean isValidityEnabled() {
+        return validityEnabled;
+    }
+
     public PageResult<ItemVO> page(ItemQueryDTO q, Long userId) {
         PageResult<ItemVO> result = queryPage(q);
         fillFavorited(result.getRecords(), userId);
@@ -325,10 +343,16 @@ public class ItemService {
         item.setVideoUrl(dto.getVideoUrl());
         item.setTradeMode(1);
         item.setPreferPointId(dto.getPreferPointId());
+        // 个人发布恒为个人卖家（1）。显式赋值而不是吃 DB 默认值：INSERT 受全局 field-strategy 影响，
+        // 一旦哪天改成 IGNORED/ALWAYS，null 会以显式 NULL 写入 NOT NULL 列直接报错（见迁移 seller_type）。
+        // 平台商品不经这里——由 platform 模块直插 seller_type=2（本方法不接收 sellerType 入参）。
+        item.setSellerType(1);
         item.setStatus(status);
         item.setAuditResult(audit.decision() == AuditDecision.PASS ? 1 : null);
         item.setAuditReason(audit.reason());
-        item.setExpireAt(LocalDateTime.now().plusDays(validDays));
+        // 限时关闭时不写过期时间（expire_at 为 NULL = 永久有效）；INSERT 对 null 字段走 NOT_NULL
+        // 策略会直接省略该列，DB 默认值本来就是 NULL，所以这里不需要额外处理。
+        item.setExpireAt(validityEnabled ? LocalDateTime.now().plusDays(validDays) : null);
         item.setPublishedAt(LocalDateTime.now());
         item.setViewCount(0);
         item.setChatCount(0);
@@ -512,15 +536,18 @@ public class ItemService {
             throw new BizException(ResultCode.ITEM_STATUS_ERROR, "只有「已下架」或「已过期」的商品可以重新上架");
         }
         LocalDateTime now = LocalDateTime.now();
+        // 限时关闭时不写过期时间（NULL = 永久有效）。这里必须用 wrapper 的 set 显式写 NULL：
+        // 实体字段走 MyBatis-Plus 的 NOT_NULL 策略，set(null) 会被从 SET 子句里省略，清不掉旧值。
+        LocalDateTime expireAt = validityEnabled ? now.plusDays(validDays) : null;
         Item update = new Item();
         update.setStatus(2);
-        update.setExpireAt(now.plusDays(validDays));
         // 重新上架算一次新的曝光：列表按 publishedAt 排序，不刷新的话它会一直埋在最后
         update.setPublishedAt(now);
         // 条件更新兜并发：两个标签页同时点，只会生效一次
         int rows = itemMapper.update(update, Wrappers.<Item>lambdaUpdate()
                 .eq(Item::getId, itemId)
-                .in(Item::getStatus, 5, 7));
+                .in(Item::getStatus, 5, 7)
+                .set(Item::getExpireAt, expireAt));
         if (rows == 0) {
             throw new BizException(ResultCode.ITEM_STATUS_ERROR, "商品状态已变化，请刷新后重试");
         }
@@ -530,12 +557,13 @@ public class ItemService {
         // 走 relist 的只有「已下架(5)/已过期(7)」——卖家自己撤下来或自然到期的内容，
         // 不代表没问题（可能是他改了名之后再挂出来），所以仍然要让审核员看一眼。
         itemReviewService.onItemLiveOptimistic(itemId, ItemReview.TYPE_RELIST);
-        log.info("[item][relist][{}][{}] 从 status={} 重新上架，有效期至 {}", itemId, userId, status, update.getExpireAt());
+        log.info("[item][relist][{}][{}] 从 status={} 重新上架，有效期至 {}", itemId, userId, status,
+                expireAt == null ? "永久（限时已关闭）" : expireAt);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("itemId", itemId);
         data.put("status", 2);
         data.put("statusText", statusText(2));
-        data.put("expireAt", update.getExpireAt());
+        data.put("expireAt", expireAt);
         return data;
     }
 
@@ -710,6 +738,13 @@ public class ItemService {
         vo.setFavCount(item.getFavCount());
         vo.setPublishedAt(item.getPublishedAt());
         vo.setExpireAt(item.getExpireAt());
+        // 平台代卖标注：seller_type 由 platform 模块直插为 2，个人商品恒为 1
+        // （迁移列为 NOT NULL DEFAULT 1，这里再兜一层 null → 1，避免老数据/异常数据让前端认成"未知卖家"）。
+        // 列表 / 搜索 / 我的发布 / 详情都走 assemble()，所以只在这一处填即可覆盖全部读路径。
+        vo.setSellerType(item.getSellerType() == null ? 1 : item.getSellerType());
+        vo.setPlatformPointId(item.getPlatformPointId());
+        // TODO(platform): 点位名称属 platform 模块，item 模块不反向依赖它；只透出 id，由前端解析名称。
+        // （若改成在这里取名，需引入 platform 的只读查询，注意别形成 item → platform → search 的环。）
         if (item.getCategoryId() != null) {
             vo.setCategoryName(categoryNames.get(item.getCategoryId()));
         }

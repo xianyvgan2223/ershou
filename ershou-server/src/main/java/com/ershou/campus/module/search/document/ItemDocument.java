@@ -30,6 +30,14 @@ public class ItemDocument {
     private Integer isUnique;
     private String coverUrl;
     private Integer status;
+    /**
+     * 卖家类型：1=个人卖家，2=平台自营（官方代卖）。
+     *
+     * <p>只用于索引里保留平台标注，公开检索不按它过滤（首页/搜索都要能看到平台商品）。
+     * 老索引没有这个 mapping 时 ES 会按动态 mapping 收下（数值 → long），不影响写入与检索；
+     * 重建索引后按显式 mapping 的 integer 落。
+     */
+    private Integer sellerType;
     /** epoch millis，排序用 */
     private Long publishedAt;
     private Long updatedAt;
@@ -54,6 +62,7 @@ public class ItemDocument {
         d.setIsUnique(item.getIsUnique());
         d.setCoverUrl(item.getCoverUrl());
         d.setStatus(item.getStatus());
+        d.setSellerType(item.getSellerType());
         d.setPublishedAt(epoch(item.getPublishedAt() != null ? item.getPublishedAt() : item.getCreatedAt()));
         d.setUpdatedAt(epoch(item.getUpdatedAt()));
         d.setViewCount(item.getViewCount());

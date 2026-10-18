@@ -52,6 +52,8 @@ const images = computed<string[]>(() => {
 })
 
 const sellerName = computed(() => item.value?.seller?.nickname || '同学')
+/** 平台官方代卖商品（第 2 轮平台代卖：`item.seller_type === 2`） */
+const isPlatformItem = computed(() => item.value?.sellerType === 2)
 const pointName = computed(
   () => item.value?.preferPoint?.name || item.value?.preferPointName || '可协商',
 )
@@ -347,13 +349,18 @@ onMounted(async () => {
         </div>
 
         <div class="info">
-          <h1 class="info__title">{{ item.title }}</h1>
+          <h1 class="info__title">
+            {{ item.title }}
+            <!-- 平台官方代卖：金色标识，点回严选专区 -->
+            <router-link v-if="isPlatformItem" class="info__official" to="/platform">官方代卖</router-link>
+          </h1>
 
           <div class="price-box">
             <span class="price price--xl"><span class="price__symbol">¥</span>{{ formatPrice(item.price) }}</span>
             <span v-if="item.originalPrice" class="price-origin">原价 ¥{{ formatPrice(item.originalPrice) }}</span>
             <span class="price-box__tags">
-              <span v-if="item.negotiable" class="chip chip--accent">可议价</span>
+              <span v-if="isPlatformItem" class="chip chip--gold">官方严选</span>
+              <span v-if="item.negotiable && !isPlatformItem" class="chip chip--accent">可议价</span>
               <span class="chip chip--brand">{{ conditionLabel(item.conditionLevel) }}</span>
             </span>
           </div>
@@ -459,9 +466,12 @@ onMounted(async () => {
               <div class="seller__main">
                 <p class="seller__name">
                   {{ sellerName }}
-                  <span v-if="item.seller?.identityFlag" class="seller__badge">商家</span>
+                  <span v-if="isPlatformItem" class="seller__badge seller__badge--official">官方严选</span>
+                  <span v-else-if="item.seller?.identityFlag" class="seller__badge">商家</span>
                 </p>
-                <p class="seller__sub">{{ item.seller?.shopName || '个人卖家 · 同校学生' }}</p>
+                <p class="seller__sub">
+                  {{ isPlatformItem ? '平台官方代卖 · 统一自提点' : item.seller?.shopName || '个人卖家 · 同校学生' }}
+                </p>
               </div>
               <span v-if="item.seller?.id" class="seller__more">主页 ›</span>
             </div>
@@ -617,6 +627,34 @@ onMounted(async () => {
     letter-spacing: -0.3px;
     line-height: 1.45;
   }
+
+  /** 标题后的「官方代卖」金色小标（平台自营商品） */
+  &__official {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 9px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #f7d774, #d9a520);
+    box-shadow: 0 1px 4px rgb(120 88 10 / 26%);
+    color: #503c00;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    vertical-align: middle;
+    transition: filter 0.18s ease;
+
+    &:hover {
+      filter: brightness(1.05);
+    }
+  }
+}
+
+/** 金色 chip：平台官方标识专用（站内其余 chip 用品牌绿/暖橙） */
+.chip--gold {
+  background: linear-gradient(135deg, #f7d774, #e0b234);
+  color: #503c00;
+  font-weight: 700;
 }
 
 .price-box {
@@ -832,6 +870,13 @@ onMounted(async () => {
     color: var(--brand-700);
     font-size: 11px;
     font-weight: 600;
+
+    // 平台官方代卖：金色「官方严选」徽章
+    &--official {
+      background: linear-gradient(135deg, #f7d774, #e0b234);
+      color: #503c00;
+      font-weight: 700;
+    }
   }
 
   &__sub {

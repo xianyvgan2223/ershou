@@ -24,6 +24,18 @@ public class ItemVO {
     private Long preferPointId;
     private String preferPointName;
     private String preferPointGuide;
+    /** 卖家类型：1=个人卖家，2=平台自营（官方代卖）。前端据此渲染「官方代卖」角标 */
+    private Integer sellerType;
+    /** 平台代卖/自提点 id（仅平台商品有值，个人商品为 null） */
+    private Long platformPointId;
+    /**
+     * 平台代卖/自提点名称（仅平台商品有值）。
+     *
+     * <p>TODO(platform): 点位数据属 platform 模块（platform_consign_point 表），item 模块不反向依赖它，
+     * 所以这里暂时恒为 null；前端用 {@code platformPointId} 调 platform 接口解析名称。
+     * 若后续 Lead 决定允许 item → platform 的只读依赖，再在 ItemService 组装时按 id 批量取名。
+     */
+    private String platformPointName;
     private Integer status;
     private String statusText;
     private Integer stock;

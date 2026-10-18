@@ -43,6 +43,13 @@ const sellerName = computed(() => props.item.seller?.nickname || '同学')
 const certified = computed(() => Boolean(props.item.seller?.identityFlag))
 const onSale = computed(() => props.item.status === 2 || props.item.status === 3)
 const statusText = computed(() => props.item.statusText || '已下架')
+/**
+ * 平台官方代卖商品（第 2 轮平台代卖新增 `item.seller_type`）。
+ *
+ * 只在 `sellerType === 2` 时显示金色「官方代卖」角标 + 卖家行「官方严选」；
+ * 老接口没有这个字段（undefined）时按个人商品渲染，行为不变。
+ */
+const isPlatform = computed(() => props.item.sellerType === 2)
 
 function goDetail(): void {
   router.push(`/item/${props.item.id}`)
@@ -87,7 +94,11 @@ async function toggleFavorite(): Promise<void> {
       </el-image>
 
       <div class="card__top">
-        <span v-if="item.negotiable" class="ribbon">可议价</span>
+        <div class="card__top-left">
+          <!-- 平台官方代卖：金色角标，与个人商品的「可议价」区分开 -->
+          <span v-if="isPlatform" class="official">官方代卖</span>
+          <span v-if="item.negotiable" class="ribbon">可议价</span>
+        </div>
         <button
           class="fav"
           :class="{ 'is-on': favorited }"
@@ -131,7 +142,8 @@ async function toggleFavorite(): Promise<void> {
         <span class="seller">
           <el-avatar :size="22" :src="item.seller?.avatar">{{ nameInitial(sellerName) }}</el-avatar>
           <span class="seller__name">{{ sellerName }}</span>
-          <span v-if="certified" class="seller__badge">商家</span>
+          <span v-if="isPlatform" class="seller__badge seller__badge--official">官方严选</span>
+          <span v-else-if="certified" class="seller__badge">商家</span>
         </span>
         <span class="card__credit">信用 {{ item.seller?.creditScore ?? '—' }}</span>
       </div>
@@ -199,7 +211,14 @@ async function toggleFavorite(): Promise<void> {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+    gap: 8px;
     pointer-events: none;
+  }
+
+  &__top-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   &__mask {
@@ -303,6 +322,24 @@ async function toggleFavorite(): Promise<void> {
   font-weight: 600;
 }
 
+/**
+ * 官方代卖角标：金色渐变，和「可议价」的暖橙刻意区分开。
+ * 金色只用于平台自营标识，别扩散到普通商品上（会把"官方"两个字变得廉价）。
+ */
+.official {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #f7d774, #d9a520);
+  box-shadow: 0 1px 4px rgb(120 88 10 / 26%);
+  color: #503c00;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
 .fav {
   display: grid;
   width: 30px;
@@ -351,6 +388,13 @@ async function toggleFavorite(): Promise<void> {
     color: var(--brand-700);
     font-size: 10.5px;
     font-weight: 600;
+
+    // 平台官方代卖：卖家行换成金色「官方严选」
+    &--official {
+      background: linear-gradient(135deg, #f7d774, #e0b234);
+      color: #503c00;
+      font-weight: 700;
+    }
   }
 }
 </style>

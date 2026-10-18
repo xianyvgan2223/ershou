@@ -10,6 +10,7 @@ import {
   Plus,
   Search,
   Setting,
+  Shop,
   ShoppingCart,
   Star,
   Tickets,
@@ -33,6 +34,7 @@ const searchKeyword = ref('')
 
 const NAV_LINKS = [
   { path: '/', label: '首页', icon: House },
+  { path: '/platform', label: '平台严选', icon: Shop },
   { path: '/map', label: '校内地图', icon: MapLocation },
   { path: '/chat', label: '消息', icon: ChatDotRound },
   { path: '/cart', label: '购物车', icon: ShoppingCart },
@@ -43,6 +45,7 @@ const NAV_LINKS = [
 const activeMenu = computed(() => {
   const path = route.path
   if (path === '/') return '/'
+  if (path.startsWith('/platform')) return '/platform'
   if (path.startsWith('/map')) return '/map'
   if (path.startsWith('/chat')) return '/chat'
   if (path.startsWith('/cart')) return '/cart'

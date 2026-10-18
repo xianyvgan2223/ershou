@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
+import { ArrowRight, Search } from '@element-plus/icons-vue'
 import ItemCard from '@/components/ItemCard.vue'
 import { fetchCategories } from '@/api/auth'
 import { fetchItems } from '@/api/item'
@@ -139,6 +139,16 @@ watch(
             />
             <el-button class="hero__search-btn" size="large" @click="handleSearch">搜索</el-button>
           </div>
+
+          <!-- 平台严选入口：官方代卖专区（第 2 轮平台代卖） -->
+          <button class="official-entry" type="button" @click="$router.push('/platform')">
+            <span class="official-entry__badge">官方</span>
+            <span class="official-entry__body">
+              <b>平台严选</b>
+              <span>官方代卖 · 统一自提点 · 限时秒杀与优惠券</span>
+            </span>
+            <span class="official-entry__arrow">进入专区<el-icon><ArrowRight /></el-icon></span>
+          </button>
 
           <div class="hero__stats">
             <div class="stat">
@@ -337,6 +347,72 @@ watch(
     &:focus {
       background: var(--brand-600);
       color: #fff;
+    }
+  }
+
+  // 平台严选入口：金色调，和站内绿色主色形成"官方专区"的区分
+  .official-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 620px;
+    margin-top: 16px;
+    padding: 10px 14px;
+    border: 1px solid #f3e3b3;
+    border-radius: var(--r-md);
+    background: linear-gradient(100deg, #fffaf0, #fff 62%);
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: #e0c274;
+      box-shadow: 0 6px 18px -12px rgb(120 88 10 / 55%);
+      transform: translateY(-1px);
+    }
+
+    &__badge {
+      flex-shrink: 0;
+      padding: 3px 8px;
+      border-radius: 7px;
+      background: linear-gradient(135deg, #f7d774, #d9a520);
+      color: #503c00;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    &__body {
+      min-width: 0;
+      flex: 1;
+
+      b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 700;
+      }
+
+      span {
+        display: block;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    &__arrow {
+      display: inline-flex;
+      flex-shrink: 0;
+      align-items: center;
+      gap: 3px;
+      color: #a97c00;
+      font-size: 12px;
+      font-weight: 600;
     }
   }
 

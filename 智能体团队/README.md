@@ -90,3 +90,74 @@
 4. `未核实` 一节明确写了没验证的内容（允许为空，但必须显式写"本轮无"）；
 5. 已向 `lead` 回报，且回报里包含 Top 发现与证据；
 6. 未修改任何源码/配置（Leader 用 `git status` 抽查）。
+
+---
+
+## 六、第 2 轮 · 平台代卖（官方严选）（2026-10-17）
+
+> 本轮是**真开发轮**（第 1 轮是只读核实轮）。契约：[`第2轮-平台代卖-设计.md`](./第2轮-平台代卖-设计.md) ｜ 验收：[`第2轮-平台代卖-验收.md`](./第2轮-平台代卖-验收.md)
+
+| 任务 | 成员 | 负责范围 | 状态 |
+| --- | --- | --- | --- |
+| T8 | `platform-dev`（本轮新增） | 后端 platform 模块 40 文件 + 迁移 SQL + Lua + 预热 + SaToken 白名单 | ✅ |
+| T9 | `item-member` | 商品平台标注字段（Item/VO/ES） | ✅ |
+| T10 | `order-member` | `OrderService.platformBuy` 平台交易（条件扣库存/完成/取消回补）+ `PlatformTradeMapper` | ✅ |
+| T11 | `map-member`（代 web 职责，团队满员） | Web 平台严选专区页 + 首页标注 + 路由导航 | ✅ |
+| T12 | `admin-member` | 后台平台代卖点管理页 + 菜单 | ✅ |
+| T13 | `app-member`（代 QA 职责，团队满员） | 端到端验收脚本 + 验收报告 | ✅ |
+| 裁决/收口 | `lead` | 契约、任务拆分、迁移落库（4 遍幂等）、SQL/并发缺陷裁决、文档收口、最终验收 | ✅ |
+
+**验收结论**：后端编译 / Web 构建 exit 0；DB 64 PASS、API 132 PASS（含 5 并发秒杀防超卖）、Redis 36 PASS、Web 30 PASS，**0 FAIL**。
+
+**本轮踩坑与修正（已同步进设计文档与开发日志）**
+1. 平台单若走 `status=3` 锁库 → 多库存秒杀退化为串行、且被解锁任务误伤 → 改为**不锁库只条件扣库存**（v1.1）。
+2. MySQL 单表 UPDATE 赋值从左到右求值 → 必须**先算 status 再扣 stock**（order-member 发现）。
+3. 种子 `item.stock=1` 与 `seckill_stock=5` 冲突 → Lead 在迁移脚本追加幂等库存修正（QA 发现）。
+4. 平台商品 `prefer_point_id` 若指向平台点会与 `trade_point` id 撞车 → 改为 `NULL`（Lead 审阅发现）。
+5. QA 侧两处脚本假缺陷（PowerShell 逗号优先级、`mysql -e` 引号）→ 已定位为脚本 bug，产品无问题。
+
+---
+
+## 七、第 3 轮 · 平台运营台（独立控制台）（2026-10-18）
+
+> 用户需求：给平台管理者一个**全新独立**的操作台（原嵌在运营后台里的代卖点页"显示得太小气"）。
+> 契约：[`第3轮-平台运营台-设计.md`](./第3轮-平台运营台-设计.md) ｜ 验收：[`第3轮-平台运营台-验收.md`](./第3轮-平台运营台-验收.md)
+
+| 任务 | 成员 | 负责范围 | 状态 |
+| --- | --- | --- | --- |
+| T14 | `platform-dev` | 后端 `PlatformConsoleController` 18 个管理接口 + 概览/订单/缓存统计服务 | ✅ |
+| T15 | `admin-member` | 独立全屏 Shell + 路由迁移 + `api/platform-console.ts` + 概览页 + 平台商品页 + 后台入口 | ✅ |
+| T16 | `map-member` | 代卖点 / 优惠券 / 秒杀场次 / 平台订单 / 缓存运维 5 页 + 商城入口 | ✅ |
+| T17 | `app-member`（QA） | API 脚本 + Web 截图/视觉量化脚本 + 验收报告 | ✅ |
+| 裁决/收口 | `lead` | 契约、缺陷裁决（3 项）、测试数据清理、文档收口、最终验收 | ✅ |
+
+**验收结论**：后端编译 / Web 构建 exit 0；API **102 PASS / 0 FAIL**；Web **115 PASS / 0 FAIL / 1 SKIP**；视觉量化：1440×900 侧栏 248 / 顶栏 64 / 内容宽 1192（通栏）/ 表格溢出 0 / KPI 6，1920×1080 内容宽 1672。
+
+**本轮缺陷闭环（QA 实测发现 → 修复 → 复测）**
+1. overview / cache 两页顶栏被压缩到 43px：根因 `.pc__main` 是 flex 列容器、`.pc__top` 未设 `flex:none` → 修复后 64px。
+2. Items 页根节点缺少运营台约定类 `.console-page`（QA 用它断言页面挂载）→ 补约定类。
+3. cache 页顶栏同 ①，由 Shell 修复一并覆盖。
+
+**环境已知问题**：`127.0.0.1:9211` 被非 ES 服务占用（返回 JWT 错误），后端 ES 写路径降级 MySQL LIKE；运营台不依赖 ES，验收不受影响（已记入报告 §5）。
+
+---
+
+## 八、第 4 轮 · 移动端平台严选 + 开发期取消商品限时（2026-10-18）
+
+> 需求：①"移动端的平台严选页面呢"；②"开发期间取消商品限时显示限制，把之前过期的商品全部上架，要不然商品太少了"。
+> 契约：[`第4轮-移动端严选与开发期限时-设计.md`](./第4轮-移动端严选与开发期限时-设计.md) ｜ 验收：[`第4轮-移动端严选与开发期限时-验收.md`](./第4轮-移动端严选与开发期限时-验收.md)
+
+| 任务 | 成员 | 负责范围 | 状态 |
+| --- | --- | --- | --- |
+| T18 | `app-member` | Flutter 平台严选页（3 新文件）+ 首页入口 + 商品卡/详情「官方代卖」标注 + Item 模型 sellerType | ✅ |
+| T19 | `item-member` | `ershou.item.validity-enabled` 开关 + 发布/重上架不写 expireAt + 过期任务跳过 + relist SQL | ✅ |
+| T20 | `chat-member`（本轮 QA） | 验收脚本 + 端到端验收 + 真机截图 + 报告 | ✅ |
+| 落库/收口 | `lead` | 执行 relist SQL（幂等两跑）、`.env` 开关、Web null 文案修复、文档收口 | ✅ |
+
+**验收结论**：**108 PASS / 0 FAIL / 1 WARN**；DB 在售 3→16 件、过期 0；限时任务跳过日志 4 次/40s、下架 0 次；`flutter analyze` 0 error/0 warning、`flutter test` 51/51、`build apk` 成功；**真机 KOZ-AL00 截图**（首页「严选」入口+官方代卖角标、平台严选页四大区块）。
+
+**本轮踩坑**
+1. MyBatis-Plus `NOT_NULL` 策略下实体 `setExpireAt(null)` 不会进 SET → 清空必须用 wrapper `.set(Item::getExpireAt, null)`。
+2. Web `PublishListView` 只判状态不判 `expireAt` → 无到期时间时文案误导；已补 `&& item.expireAt`。
+3. 8080 是**用户 IDEA 实例**，不能 kill；QA 用独立 18080 + `adb reverse 手机8080→宿主18080` 完成真机验收。
+4. 既有 `ScheduledTasks.flushViewCounts` NPE（双实例共享 Redis 触发）非本轮引入，记 P2。

@@ -34,6 +34,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '首页' },
       },
       {
+        // 平台严选（官方代卖专区）：商品与代卖点都是公开可读的，**不需要登录**；
+        // 领券 / 抢购 / 下单这类动作由页面自己检查登录后跳 `/login?redirect=/platform`。
+        path: 'platform',
+        name: 'platform',
+        component: () => import('@/views/PlatformView.vue'),
+        meta: { title: '平台严选' },
+      },
+      {
         path: 'map',
         name: 'campus-map',
         component: () => import('@/views/MapView.vue'),
@@ -148,7 +156,63 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/admin/AdminLogsView.vue'),
             meta: { title: '操作日志', requiresAuth: true, requiresAdmin: true },
           },
+          {
+            // 平台代卖点管理入口已迁到独立运营台（第 3 轮），旧地址保留跳转兼容
+            path: 'platform-points',
+            redirect: '/console/platform/points',
+          },
         ],
+      },
+    ],
+  },
+  {
+    // 平台运营台：独立全屏 Shell（不套 DefaultLayout / AdminShell），第 3 轮新增。
+    // 父级 meta 会被子路由继承（Vue Router 4 的 to.meta 合并），现有守卫无需改。
+    path: '/console/platform',
+    component: () => import('@/views/console/PlatformConsoleShell.vue'),
+    meta: { title: '平台运营台', requiresAuth: true, requiresAdmin: true },
+    children: [
+      {
+        path: '',
+        name: 'console-overview',
+        component: () => import('@/views/console/PlatformConsoleOverview.vue'),
+        meta: { title: '运营概览' },
+      },
+      {
+        path: 'items',
+        name: 'console-items',
+        component: () => import('@/views/console/PlatformConsoleItems.vue'),
+        meta: { title: '平台商品' },
+      },
+      {
+        path: 'points',
+        name: 'console-points',
+        component: () => import('@/views/console/PlatformConsolePoints.vue'),
+        meta: { title: '代卖点' },
+      },
+      {
+        path: 'coupons',
+        name: 'console-coupons',
+        component: () => import('@/views/console/PlatformConsoleCoupons.vue'),
+        meta: { title: '优惠券' },
+      },
+      {
+        path: 'flash-sales',
+        name: 'console-flash',
+        component: () => import('@/views/console/PlatformConsoleFlash.vue'),
+        meta: { title: '秒杀场次' },
+      },
+      {
+        path: 'orders',
+        name: 'console-orders',
+        component: () => import('@/views/console/PlatformConsoleOrders.vue'),
+        meta: { title: '平台订单' },
+      },
+      {
+        path: 'cache',
+        name: 'console-cache',
+        component: () => import('@/views/console/PlatformConsoleCache.vue'),
+        meta: { title: '缓存运维' },
       },
     ],
   },

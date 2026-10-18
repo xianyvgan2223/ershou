@@ -240,6 +240,7 @@ public class ItemIndexService {
                       "stock":          { "type": "integer" },
                       "isUnique":       { "type": "integer" },
                       "status":         { "type": "integer" },
+                      "sellerType":     { "type": "integer" },
                       "coverUrl":       { "type": "keyword", "index": false },
                       "publishedAt":    { "type": "long" },
                       "updatedAt":      { "type": "long" },

@@ -7,6 +7,7 @@ import '../widgets/common.dart';
 import '../widgets/item_card.dart';
 import 'favorites_page.dart';
 import 'item_detail_page.dart';
+import 'platform_page.dart';
 
 /// 首页：搜索 + 分类 + 排序 + 双列瀑布流。
 /// 顶栏和筛选区刻意压扁，把竖向空间都留给商品。
@@ -173,6 +174,39 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               child: const Icon(Icons.favorite_border,
                   size: 17, color: AppColors.price),
+            ),
+          ),
+          const SizedBox(width: 6),
+          // 第 4 轮：平台严选入口（金色胶囊，落在顶栏右侧、收藏入口旁；不改底部 4 tab）
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const PlatformPage()),
+            ),
+            child: Container(
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFF7C948), Color(0xFFE8A100)],
+                ),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.verified_rounded, size: 15, color: Colors.white),
+                  SizedBox(width: 3),
+                  Text(
+                    '严选',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

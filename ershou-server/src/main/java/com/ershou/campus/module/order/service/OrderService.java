@@ -20,6 +20,7 @@ import com.ershou.campus.module.order.dto.CreateOrderDTO;
 import com.ershou.campus.module.order.dto.UpdatePointDTO;
 import com.ershou.campus.module.order.entity.MeetupOrder;
 import com.ershou.campus.module.order.mapper.MeetupOrderMapper;
+import com.ershou.campus.module.order.mapper.PlatformTradeMapper;
 import com.ershou.campus.module.order.vo.OrderVO;
 import com.ershou.campus.module.search.service.ItemIndexService;
 import com.ershou.campus.module.user.entity.SysUser;
@@ -28,11 +29,13 @@ import com.ershou.campus.module.user.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -46,6 +49,8 @@ public class OrderService {
 
     private final MeetupOrderMapper orderMapper;
     private final ItemMapper itemMapper;
+    /** 平台代卖交易 SQL（条件扣库存/完成收口/取消还库存，见第 2 轮平台代卖设计 v1.1 3.5） */
+    private final PlatformTradeMapper platformTradeMapper;
     private final CartService cartService;
     private final TradePointService tradePointService;
     private final UserService userService;
@@ -72,6 +77,18 @@ public class OrderService {
     private static final int LOCK_BUFFER_HOURS = 2;
     private static final int LOCK_DEFAULT_HOURS = 24;
     private static final int MAX_SLOT_MINUTES = 180;
+
+    // ---------------------------------------------------------------- 平台代卖（第 2 轮）
+
+    /** 平台官方账号 id（平台代卖单的卖家）；默认 1000，见第 2 轮设计 2.1。平台账号不可登录、不参与信用分 */
+    @Value("${ershou.platform.seller-id:1000}")
+    private Long platformSellerId = 1000L;
+
+    /** item.seller_type 的两个取值（迁移脚本 sql/migration-platform.sql：1=个人 2=平台） */
+    private static final int SELLER_TYPE_PLATFORM = 2;
+
+    /** 平台代卖单的备注：平台单没有"卖家接受"这一步，靠它把平台单和普通面交单区分开（设计 2.3） */
+    private static final String PLATFORM_ORDER_REMARK = "平台代卖自提单";
 
     // ---------------------------------------------------------------- 创建
 
@@ -259,6 +276,111 @@ public class OrderService {
         return order;
     }
 
+    // ---------------------------------------------------------------- 平台代卖下单（第 2 轮）
+
+    /**
+     * 平台代卖下单（平台作为卖家）：平台商品直购 / 秒杀抢购成功后建一张「待自提」面交单。
+     *
+     * <p><b>签名由第 2 轮设计 3.5 固定</b>（platform-dev 的直购/抢购 controller 直接调用），
+     * 参数顺序与类型不要改。
+     *
+     * <p>与个人商品的 {@link #createSingle} 的区别：
+     * <ul>
+     *   <li>卖家是平台官方账号（{@link #platformSellerId}），不是真实用户，谁也点不了"接受"；</li>
+     *   <li><b>不是"意向单"而是直接扣库存（不锁库）</b>：平台没有"卖家确认"这一步，抢到就要留货；</li>
+     *   <li>订单直接进 status=2（待自提），并写 {@code seller_confirm_at=NOW()} 表示平台已自动确认；</li>
+     *   <li>面交点是平台代卖点（{@code platform_consign_point.id}，<b>不是</b> trade_point 的 id）；</li>
+     *   <li>不发"卖家待办"私聊：平台账号不可登录，也没有人需要处理待办。</li>
+     * </ul>
+     *
+     * <p><b>防超卖（v1.1）</b>：{@code PlatformTradeMapper#decrementPlatformStock} 是一条条件更新
+     * （{@code WHERE seller_type=2 AND status=2 AND stock>=?}），影响 0 行就抛 30004 ——
+     * 并发抢购时由数据库行锁保证库存不会扣成负数。**平台商品不进入 status=3 锁定态**：
+     * 一旦锁库，多库存秒杀的 5 份库存会退化成"一次只能卖一份"，还会被 status=3 的锁过期任务误伤。
+     *
+     * @param itemId    平台商品 id
+     * @param buyerId   买家 user id
+     * @param quantity  购买数量（null / &lt;1 当 1；平台商品可能有多库存）
+     * @param dealPrice 成交价（秒杀价或商品价；null 时回退商品现价）
+     * @param pointId   平台代卖/自提点 id（可空 = 待协商）
+     * @return 至少含 orderId/orderNo/itemId/itemTitle/itemCover/dealPrice/pointId（设计 3.5）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> platformBuy(Long itemId, Long buyerId, Integer quantity,
+                                           BigDecimal dealPrice, Long pointId) {
+        if (itemId == null || buyerId == null) {
+            throw new BizException(ResultCode.PARAM_ERROR, "缺少商品或买家");
+        }
+        Item item = itemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BizException(ResultCode.ITEM_NOT_FOUND);
+        }
+        // 1) 前置校验：给用户看得懂的错误；真正的防超卖闸门是下面的条件扣库存
+        Integer sellerType = platformTradeMapper.selectSellerType(itemId);
+        if (sellerType == null || sellerType != SELLER_TYPE_PLATFORM) {
+            throw new BizException(ResultCode.PARAM_ERROR, "该商品不是平台代卖商品，不能走平台下单");
+        }
+        if (item.getStatus() != null && item.getStatus() == 4) {
+            throw new BizException(ResultCode.ITEM_SOLD);
+        }
+        if (item.getStatus() == null || item.getStatus() != 2) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR, "商品当前不可购买");
+        }
+        if (Objects.equals(item.getSellerId(), buyerId)) {
+            throw new BizException(ResultCode.PARAM_ERROR, "不能购买自己发布的商品");
+        }
+        int qty = quantity == null || quantity < 1 ? 1 : quantity;
+        int stock = item.getStock() == null ? 0 : item.getStock();
+        if (stock < qty) {
+            throw new BizException(ResultCode.PARAM_ERROR, "库存不足（剩余 " + stock + " 件）");
+        }
+        BigDecimal price = dealPrice == null ? item.getPrice() : dealPrice;
+
+        // 2) 条件扣库存（不锁库，v1.1）：并发由 WHERE stock>=? 保证不超卖；扣完库存归零 → status=4
+        int deducted = platformTradeMapper.decrementPlatformStock(itemId, qty);
+        if (deducted == 0) {
+            throw new BizException(ResultCode.ITEM_LOCKED, "这件平台商品已售完或库存不足，看看同款？");
+        }
+
+        // 3) 建「待自提」面交单：平台账号作为卖家，已自动确认
+        MeetupOrder order = new MeetupOrder();
+        order.setOrderNo(genOrderNo());
+        order.setBuyerId(buyerId);
+        order.setSellerId(platformSellerId);
+        order.setItemId(itemId);
+        order.setItemTitle(item.getTitle());
+        order.setItemCover(item.getCoverUrl());
+        order.setQuantity(qty);
+        order.setDealPrice(price);
+        order.setPointId(pointId);
+        // point_id 存的是 platform_consign_point.id，不是 trade_point.id：
+        // 这里**不写 point_snapshot**（拿 trade_point 同 id 的点位拼快照只会拼错），
+        // 订单列表的点位名由 toVO 按平台点表取（PlatformTradeMapper#selectPlatformPointName）
+        order.setStatus(STATUS_WAITING);
+        order.setRescheduleCount(0);
+        order.setSellerConfirmAt(LocalDateTime.now());
+        order.setRemark(PLATFORM_ORDER_REMARK);
+        orderMapper.insert(order);
+
+        // 4) 事务后：同步 ES + 清商品缓存（商品 status/stock 都变了）
+        TxHooks.afterCommit(() -> itemIndexService.syncById(itemId));
+        TxHooks.afterCommit(() -> evictor.itemChanged(itemId));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", order.getId());
+        result.put("orderNo", order.getOrderNo());
+        result.put("itemId", itemId);
+        result.put("itemTitle", item.getTitle());
+        result.put("itemCover", item.getCoverUrl());
+        result.put("dealPrice", price);
+        result.put("pointId", pointId);
+        result.put("quantity", qty);
+        result.put("status", STATUS_WAITING);
+        log.info("[order][platform-buy][{}] orderNo={} item={} qty={} price={} 平台单已扣库存（不锁库）",
+                buyerId, order.getOrderNo(), itemId, qty, price);
+        return result;
+    }
+
     /**
      * 面交单的状态变化统一用私聊通知对方。
      *
@@ -429,13 +551,16 @@ public class OrderService {
         update.setCancelBy(userId);
         update.setCancelReason(StringUtils.hasText(reason) ? reason : "卖家拒绝了面交");
         orderMapper.updateById(update);
-        itemMapper.releaseLock(order.getItemId());
+        releaseItemLock(order);
         TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
         TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
         // 被拒绝必须让对方收到消息：以前只是在"我的面交"里默默变成已取消，买家根本不知道
-        TxHooks.afterCommit(() -> notifyPeer(order, userId,
-                "【约面交】抱歉，《" + order.getItemTitle() + "》这次我没法赴约："
-                        + update.getCancelReason() + "\n你可以换个时间再约，或者看看别的同学的同款～"));
+        // 平台单不通知：对方是平台官方账号，没人会看（任务要求避免平台账号收到私聊）
+        if (!isPlatformOrder(order)) {
+            TxHooks.afterCommit(() -> notifyPeer(order, userId,
+                    "【约面交】抱歉，《" + order.getItemTitle() + "》这次我没法赴约："
+                            + update.getCancelReason() + "\n你可以换个时间再约，或者看看别的同学的同款～"));
+        }
         log.info("[order][reject][{}] orderNo={} reason={}", userId, order.getOrderNo(), reason);
     }
 
@@ -451,12 +576,16 @@ public class OrderService {
         update.setCancelBy(userId);
         update.setCancelReason(StringUtils.hasText(reason) ? reason : "双方协商取消");
         orderMapper.updateById(update);
-        itemMapper.releaseLock(order.getItemId());
+        // 平台单购买时已扣库存，取消要还库存；个人单走 releaseLock 只回在售
+        releaseItemLock(order);
         TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
         TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
-        TxHooks.afterCommit(() -> notifyPeer(order, userId,
-                "【约面交】《" + order.getItemTitle() + "》这次面交取消了："
-                        + update.getCancelReason() + "\n需要的话可以再约一次～"));
+        // 平台单不通知平台账号（没人看），个人单照旧私聊对方
+        if (!isPlatformOrder(order)) {
+            TxHooks.afterCommit(() -> notifyPeer(order, userId,
+                    "【约面交】《" + order.getItemTitle() + "》这次面交取消了："
+                            + update.getCancelReason() + "\n需要的话可以再约一次～"));
+        }
         log.info("[order][cancel][{}] orderNo={}", userId, order.getOrderNo());
     }
 
@@ -500,6 +629,8 @@ public class OrderService {
      *
      * <p>卖家点一次即完成（线下钱货两清由卖家判断）：商品置已售出 + 双方信用分 +2。
      * 买家这一侧只记录"我收到了"，不推进状态 —— 否则买家单方面点一下就能把卖家的商品下架。
+     * <b>例外是平台代卖单</b>：卖家是平台官方账号、没人能点"已卖出"，买家的「我已收到」直接完成，
+     * 见 {@link #completePlatformOrder}。
      * 原来的 6 位核销码已经去掉：它带有效期（时间窗结束 +2h），迟到或改期就"核销码已过期"，
      * 这张单永远完不成，只能取消重约。
      */
@@ -512,6 +643,12 @@ public class OrderService {
         LocalDateTime now = LocalDateTime.now();
         Map<String, Object> result = new LinkedHashMap<>();
         if (Objects.equals(order.getBuyerId(), userId)) {
+            // 平台代卖单：卖家是平台官方账号，下单时已自动写 seller_confirm_at，
+            // 永远没有"卖家点已卖出"这一步 —— 所以买家的「我已收到」就是完成动作。
+            // 否则平台单会永远停在「待面交」，买家红点也永远不消（第 2 轮 QA 验收项）。
+            if (isPlatformOrder(order)) {
+                return completePlatformOrder(order, now);
+            }
             if (order.getBuyerConfirmAt() == null) {
                 MeetupOrder update = new MeetupOrder();
                 update.setId(orderId);
@@ -558,6 +695,70 @@ public class OrderService {
             throw new BizException(ResultCode.ORDER_NO_PERMISSION);
         }
         return order;
+    }
+
+    /** 是不是平台代卖单：平台单的卖家是平台官方账号（第 2 轮设计 2.3） */
+    private boolean isPlatformOrder(MeetupOrder order) {
+        return order != null && platformSellerId != null && platformSellerId.equals(order.getSellerId());
+    }
+
+    /**
+     * 取消/拒绝时释放商品占用：平台单要<b>还库存</b>，个人单只回在售。
+     *
+     * <p>个人商品的 {@code ItemMapper.releaseLock} 只改状态、不还库存（个人单本来就没扣过库存）；
+     * 平台单在 {@code platformBuy} 里已经 {@code stock = stock - ?} 扣过，取消必须补回去，
+     * 否则商品回到在售后会"凭空少一件"。库存归零时平台商品已被置 4，还库存后由 SQL 一并回在售 2。
+     */
+    private void releaseItemLock(MeetupOrder order) {
+        if (isPlatformOrder(order)) {
+            int qty = order.getQuantity() == null || order.getQuantity() < 1 ? 1 : order.getQuantity();
+            platformTradeMapper.restorePlatformStock(order.getItemId(), qty);
+        } else {
+            itemMapper.releaseLock(order.getItemId());
+        }
+    }
+
+    /**
+     * 平台代卖单完成：买家「我已收到」直接落定（平台账号不会点「已卖出」）。
+     *
+     * <p>与个人单卖家成交的区别：
+     * <ul>
+     *   <li>商品按<b>剩余库存</b>收口（{@code PlatformTradeMapper#settlePlatformItem}）：
+     *       还剩库存 → 回在售(2) 让别人继续买，已扣到 0 → 已售出(4)。
+     *       不能复用 {@code ItemMapper.markSold}：它会无条件 {@code stock=0}，
+     *       多库存平台商品（秒杀 5 份）的剩余份数会被清掉；</li>
+     *   <li><b>不作废该商品上的其他单</b>：平台商品多库存、允许并发成交，别人的单不能跟着失效；</li>
+     *   <li>平台账号不加信用分、不写流水（不可登录、也不该有信用分），买家仍 +2；</li>
+     *   <li>不给平台账号发私聊：平台账号收不到也没有人看，避免污染会话（任务要求）。</li>
+     * </ul>
+     */
+    private Map<String, Object> completePlatformOrder(MeetupOrder order, LocalDateTime now) {
+        MeetupOrder update = new MeetupOrder();
+        update.setId(order.getId());
+        update.setStatus(STATUS_DONE);
+        update.setBuyerConfirmAt(now);
+        if (order.getSellerConfirmAt() == null) {
+            update.setSellerConfirmAt(now);
+        }
+        orderMapper.updateById(update);
+
+        // 按剩余库存收口商品状态（设计 3.5 第 6 条：影响 0 行 → 抛错回滚）。
+        // 0 行只会出现在商品已被下架/违规下架/过期（status 5/7/8）的情况 ——
+        // 那种单子早该由 closeActiveOrders 作废，宁可报错让买家刷新，也不留"单子已完成但商品状态矛盾"
+        int settled = platformTradeMapper.settlePlatformItem(order.getItemId());
+        if (settled == 0) {
+            throw new BizException(ResultCode.ITEM_STATUS_ERROR, "商品状态已变化，无法完成交易，请刷新后重试");
+        }
+        TxHooks.afterCommit(() -> itemIndexService.syncById(order.getItemId()));
+        TxHooks.afterCommit(() -> evictor.itemChanged(order.getItemId()));
+        // 信用分：买家 +2；平台卖家（seller_id=平台账号）不加分、不写 credit_log
+        userMapper.addCredit(order.getBuyerId(), 2);
+        log.info("[order][platform-finished][{}] orderNo={} 平台单已完成（商品按剩余库存收口），买家信用分 +2（平台账号不加分）",
+                order.getBuyerId(), order.getOrderNo());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", STATUS_DONE);
+        result.put("message", "交易已完成，信用分 +2");
+        return result;
     }
 
     /** 时间窗校验：两边都留空 = 待协商（合法）；只填一边、或填了但越界才算错 */
@@ -722,10 +923,18 @@ public class OrderService {
         vo.setBuyerConfirmed(o.getBuyerConfirmAt() != null);
         vo.setSellerConfirmed(o.getSellerConfirmAt() != null);
         vo.setMyRole(Objects.equals(o.getBuyerId(), currentUserId) ? "buyer" : "seller");
-        TradePoint p = tradePointService.getById(o.getPointId());
-        if (p != null) {
-            vo.setPointName(p.getName());
-            vo.setPointGuide(p.getGuideText());
+        if (isPlatformOrder(o)) {
+            // 平台单的面交点是 platform_consign_point.id，去 trade_point 里查会命中同 id 的无关点位。
+            // 这里按平台点表取名称；点名称/指引由平台模块维护（order 侧只读，不改平台表）
+            if (o.getPointId() != null) {
+                vo.setPointName(platformTradeMapper.selectPlatformPointName(o.getPointId()));
+            }
+        } else {
+            TradePoint p = tradePointService.getById(o.getPointId());
+            if (p != null) {
+                vo.setPointName(p.getName());
+                vo.setPointGuide(p.getGuideText());
+            }
         }
         Map<Long, SysUser> users = userService.mapByIds(List.of(o.getBuyerId(), o.getSellerId()));
         SysUser buyer = users.get(o.getBuyerId());

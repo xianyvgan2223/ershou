@@ -171,6 +171,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\dev-all.ps1
 > ES 镜像默认由 `docker/es/Dockerfile` 构建，已内置 **IK 中文分词**（装不上会自动退官方 smartcn，再不行用内置 ngram —— 后端启动时探测实际可用的分词器再建索引）。
 > 想用纯官方镜像：删掉 `docker-compose.yml` 里 elasticsearch 的 `build` 段、把 image 改回 `elasticsearch:8.13.4`，然后删除旧索引重启后端即可。
 
+### 开发期关闭商品限时（2026-10-18，仅开发/演示）
+
+开发/演示期商品太少时，可以**关闭商品限时下架**并把历史已过期商品重新上架。生产请保持默认开启。
+
+```powershell
+# 1) 本地 .env（已被 gitignore）默认已配：ITEM_VALIDITY_ENABLED=false、ITEM_VALID_DAYS=36500
+#    生产/正式数据：改回 ITEM_VALIDITY_ENABLED=true（或不配，走默认 true）
+# 2) 把历史「已过期(7)」商品重新上架（幂等；只动 status=7，不动已售出/已下架/锁定）
+Get-Content .\sql\dev-relist-expired.sql -Raw | mysql --host=127.0.0.1 --port=3306 --user=ershou --password=<你的密码> --database=ershou
+# 3) 重启后端生效（配置在启动时读取）
+```
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `ershou.item.validity-enabled`（env `ITEM_VALIDITY_ENABLED`） | `true` | `false` 时发布/重新上架不写 `expire_at`（NULL），过期定时任务直接跳过 |
+| `ershou.item.valid-days`（env `ITEM_VALID_DAYS`） | `7` | 商品有效期（天），置超大值可作双保险 |
+| `ershou.item.expire-cron`（env `ITEM_EXPIRE_CRON`） | `0 30 * * * ?` | 过期扫描 cron |
+
 ### 让「高数」能搜到「高等数学」（简称 / 同义词）
 
 两个文件都在 `docker/es/`，改完重建镜像即可：
@@ -209,7 +227,7 @@ curl.exe "http://127.0.0.1:9211/ershou_item/_count?q=status:2"       # ↔ ... W
 
 ## 三、已实现功能
 
-### 后端（162 个 Java 文件 / 88 个接口）
+### 后端（216 个 Java 文件 / 20 个 Controller）
 
 > 数字按 **2026-10-10 实测**更新（`GET /v3/api-docs` 里的操作数）；
 > 这类统计会随改动过期，别当承诺看，以代码为准。
@@ -247,18 +265,67 @@ curl.exe "http://127.0.0.1:9211/ershou_item/_count?q=status:2"       # ↔ ... W
 | 文件 | MinIO 上传（校验 → 压缩长边 1280 → 存桶），MinIO 不可用时可切 `local` 降级 |
 | 定时任务 | 释放超时锁库、面交单 2 小时超时失效、商品 **7 天**到期自动下架（并作废该商品上的挂单）、**浏览量每 10 分钟批量回写** |
 | **运营后台** | 审核工作台（商品 / 点位 通过·驳回·批量）、**上架审核**（实时确认每条上架都被看过）、模板化驳回原因、商品全状态检索与**强制下架**、用户封禁/解封/限权、信用分人工调整（写 credit_log 流水）、操作审计（sys_audit_log，含变更前后与 IP）；管理员判定统一走 role_flags & 8 或白名单 |
+| **平台代卖（官方严选）** | **平台作为卖家**：官方账号 `id=1000`（`role_flags=16` 新位、不可登录）+ `item.seller_type=2` 标注；后台**代卖/自提点管理**（CRUD / 启停 / 软删 / 排序）；`/platform` 专区页：代卖点筛选 + **秒杀**（Lua 原子扣减 + Hash 限购 + 5s 限流 + 启动预热/重建 + 失败补偿）+ **优惠券**（Lua 抢券 + 每人限领 + DB 唯一键兜底）+ 平台商品直购（**条件扣库存、不锁库**，并发不超卖）；平台单复用面交单状态机（平台自动确认 → 买家「我已收到」完成 → 取消回补库存），买家信用 +2、平台账号不计分；缓存 4 类（代卖点/券/场次/概览）TTL 为设计上限×90% 防抖动 |
 | **Redis 读缓存** | 商品详情（10 分钟 + 空值缓存防穿透，**走 `getOrLoad` 重建锁防击穿**）、地图点位含在售数/最低价（30 分钟，版本号 O(1) 整体失效）、分类/学校/校区/点位字典（1 小时，MGET 消 N+1）、运营概览 8 个 count（30 秒）；所有 TTL 加 **0~10% 抖动**防雪崩；浏览量走 Redis 计数 + 每 10 分钟批量回写；失效统一在 `TxHooks.afterCommit` 执行；`ershou.cache.enabled=false` 一键回滚 |
+| **平台运营台（独立控制台）** | 独立全屏 Shell（`/console/platform`，248px 深色侧栏 + 64px sticky 顶栏 + 通栏 max-width 1760，**不套商店/运营后台布局**）：概览 Dashboard（6 KPI 大卡 + 最近订单 + 库存告警/场次倒计时/快捷操作）、平台商品管理（筛选/发布/编辑/下架/重新上架）、代卖点、优惠券（增改/启停/领取进度）、秒杀场次（场次 + 商品增删 + 状态切换）、平台订单（tabs/搜索/抽屉详情）、缓存运维（Redis key/TTL/值 + 重建 + 自动刷新）；后端 `PlatformConsoleController` 18 个管理接口（每接口 `requireAdminId()`），商品写后同步 ES，券/场次写后只重建对应 Redis 缓存 |
 | 通用 | 统一响应体 + 错误码分段 + 全局异常 + traceId 链路 + 分页 + Swagger |
 
-### 前端（21 个页面 / 8 个业务组件 / 66 个 ts+vue 源文件）
+### 前端（30 个页面 / 8 个业务组件 / 77 个 ts+vue 源文件）
 
 > 数字按 **2026-10-10 实测**更新（`src/views/*.vue` 21 个、`src/components/*.vue` 8 个）。
 
 登录、首页（搜索/分类/排序/分页 + 商品卡片**浏览量徽标**）、**校内地图**（双模式：`map_type=1` Leaflet CRS.Simple 自绘平面图 / `map_type=2` **高德 JS API 真地图 + 定位蓝点 + 米制距离**）、商品详情、发布（多图上传）、购物车（分组 + 合并面交）、我的面交单（买家/卖家双 tab、核销）、我的收藏、我的发布、**商品详情（约面交直接下单：选面交点 + 时间窗，面交点下拉可输入搜索）**、**个人中心（含编辑资料：点头像或按钮打开弹窗，改昵称/头像/学校校区/小铺，头像走 MinIO 单图上传）**、**消息（私聊：会话列表 + 聊天窗 + 快捷话术 + 未读红点，断线指数退避重连）**。
 
-**运营后台**（/admin，仅运营可见，路由 requiresAdmin 守卫）：运营概览、审核工作台（商品/点位双 tab + 批量处置 + 驳回原因模板）、商品管理（强制下架）、用户管理（封禁/解封/信用分）、操作日志。
+**运营后台**（/admin，仅运营可见，路由 requiresAdmin 守卫）：运营概览、审核工作台（商品/点位双 tab + 批量处置 + 驳回原因模板）、商品管理（强制下架）、用户管理（封禁/解封/信用分）、操作日志、**平台代卖点管理**（第 2 轮新增）。
+
+**平台严选**（/platform，第 2 轮新增，游客可浏览）：官方严选 hero（在售平台商品 / 代卖点 / 可领券统计）+ 代卖点 chips 筛选 + **限时秒杀**（倒计时 / 库存进度 / 四种状态）+ **优惠券**（满减/折扣、剩余量、领取与已领态）+ 平台商品分页（复用商品卡，显示「官方代卖」金色角标）；首页与顶部导航均有入口，商品详情页有官方徽章与专区回链。领券/抢购/购买未登录统一跳 `/login?redirect=/platform`。
+
+**平台运营台**（/console/platform，第 3 轮新增，仅运营可见）：**独立全屏控制台**（深色 248px 侧栏 + 64px 顶栏 + 通栏内容，不套商店布局）7 个页面 —— 概览（6 KPI + 最近订单 + 库存告警/倒计时/快捷操作）/ 平台商品（发布、编辑、下架、重新上架）/ 代卖点 / 优惠券 / 秒杀场次 / 平台订单 / 缓存运维（Redis key 与 TTL 可视化 + 一键重建）。运营后台头部有「平台运营台 →」入口，旧地址 `/admin/platform-points` 自动跳转。
+
+**移动端平台严选**（Flutter App，第 4 轮新增）：`ershou_app/lib/ui/pages/platform_page.dart` —— Hero 统计卡（在售平台商品/代卖点/可领券）+ 代卖点 chips 筛选 + 限时秒杀（每秒倒计时/秒杀价/库存进度/抢购四态）+ 优惠券领取 + 严选好物 2 列网格（分页/下拉刷新/空态/错误重试）；首页顶栏金色「严选」入口，商品卡显示金色「官方代卖」角标，详情页有官方徽章。数据层为 `platform_models.dart` + `platform_repository.dart`，复用第 2 轮后端接口；已有真机（KOZ-AL00）实测截图。
 
 ## 四、关键验证结果
+
+### 平台代卖（2026-10-17 独立验收，`智能体团队/第2轮-平台代卖-验收.md`）
+
+| 项 | 结果 |
+| --- | --- |
+| 后端编译 `mvn -DskipTests compile` / Web `npm run build` | **exit 0 / exit 0** |
+| DB（迁移 4 遍幂等 + 6 张表 + 种子 + 唯一键 + 双平面对账） | **64 PASS / 0 FAIL** |
+| 运行时 API（公开读、领券 10 并发、秒杀 5 并发防超卖、直购/完成/取消回补、后台 CRUD、越权负向、8 项回归） | **132 PASS / 0 FAIL / 1 SKIP** |
+| Redis（13 个 key、库存非负、DB↔Redis 对账 6/6、验收前后 diff 全部为负） | **36 PASS / 0 FAIL** |
+| Web 页面（`/platform`、首页入口与角标、后台代卖点，Chrome 无 console error） | **30 PASS / 0 FAIL + 6 张截图** |
+
+> 并发口径实测：**库存 5 → 5 个不同用户并发抢购全部成功、第 6 个失败（code=0 表示业务失败），Redis 库存归 0 且不为负、无重复落库**；平台单 `lock_user_id/lock_expire_at` 恒 NULL（不锁库设计）。
+> 截图在 `.build/qa/web-*.png`；证据日志在 `.build/qa/logs/`；验收脚本为 `scripts/verify-platform-{db,api,redis,web}.*`，可重复执行。
+
+### 平台运营台（2026-10-18 独立验收，`智能体团队/第3轮-平台运营台-验收.md`）
+
+| 项 | 结果 |
+| --- | --- |
+| 后端编译 `mvn -DskipTests compile` / Web `npm run build` | **BUILD SUCCESS / exit 0** |
+| 管理接口与写后副作用（18 接口 + 权限负向 36 项 + 改价/下架/券/场次即时生效） | **102 PASS / 0 FAIL / 1 WARN(信息项)** |
+| Web 页面（7 页 × 1440 + 概览 1920 + 兼容 3 项 + 无 console.error） | **115 PASS / 0 FAIL / 1 SKIP（秒杀页卡片式无表格）** |
+| 视觉量化（1440×900 全 7 页一致） | 侧栏 **248px** / 顶栏 **64px** / 内容宽 **1192 = 视口−248**（通栏）/ 表格横向溢出 **0** / KPI **6** / `wrapped=false`（独立 Shell） |
+| 视觉量化（1920×1080 概览） | 内容宽 **1672 > 1600** / 横向溢出 0 / KPI 6 |
+| 兼容 | 旧地址 `/admin/platform-points` → `/console/platform/points` 跳转通过；`/admin` 其他页、`/platform` 商城页正常 |
+
+> 缺陷闭环 3 项：① overview/cache 顶栏被 flex-shrink 压到 43px → `.pc__top{flex:none}` 修复后 64px；② Items 页缺约定根类 `.console-page` → 已补；③ 同 ①的 cache 页。
+> 截图在 `.build/console/*.png`（7×1440 + 1×1920 + 3 兼容）；脚本 `scripts/verify-console-{api.ps1,web.mjs}`。
+> **环境已知问题**：`127.0.0.1:9211` 当前被非 ES 服务占用（返回 JWT 错误），ES 写路径降级 MySQL LIKE；运营台功能不依赖 ES，验收仍全 PASS。
+
+### 移动端平台严选 + 开发期取消商品限时（2026-10-18 独立验收）
+
+| 项 | 结果 |
+| --- | --- |
+| DB 数据修复（13 件过期商品重新上架，SQL 幂等两跑） | 在售 **3 → 16 件**、已过期 0 件、占位 `expire_at IS NULL` 17/17 |
+| 商品限时关闭（配置 + 任务跳过） | 日志「商品限时已关闭…跳过本轮」40s 内 4 次；「件商品过期自动下架」**0 次**；测试发布/重上架商品 `expireAt=null`（API+DB 双证） |
+| Flutter 编译测试 | `flutter analyze` **0 error / 0 warning**、`flutter test` **51/51**、`flutter build apk --debug` exit 0（207MB） |
+| 真机（KOZ-AL00） | 首页「严选」入口 + 金色「官方代卖」角标；平台严选页 Hero/代卖点/限时秒杀/优惠券/严选好物全部截图与 UI 文本命中 |
+| 端到端验收 | **108 PASS / 0 FAIL / 1 WARN**（脚本 `scripts/verify-mobile-round4.ps1`，报告 `智能体团队/第4轮-移动端严选与开发期限时-验收.md`） |
+| Web 回归 | `npm run build` exit 0；兼容 `expireAt=null`（修掉「自动下架」无天数文案） |
+
+> 验收期间用户的 IDEA 后端实例（8080）全程未被 kill/未被打扰；QA 用独立端口 18080 验收，跑完已释放。
 
 ```
 违规内容"管制刀具"        → 50001 内容涉嫌违规：管制刀具（禁售品类）

@@ -419,14 +419,31 @@ class _ItemDetailPageState extends ConsumerState<ItemDetailPage> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            item.title,
-            style: const TextStyle(
-              fontSize: 17,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 第 4 轮：平台官方严选商品在标题旁显示金色「官方代卖」徽章
+              if (item.isOfficial)
+                const Padding(
+                  padding: EdgeInsets.only(top: 2, right: 6),
+                  child: TagChip(
+                    text: '官方代卖',
+                    color: Color(0xFF7A4E00),
+                    background: Color(0xFFF7D08A),
+                  ),
+                ),
+              Expanded(
+                child: Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Wrap(

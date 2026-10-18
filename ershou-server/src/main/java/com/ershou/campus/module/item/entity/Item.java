@@ -30,6 +30,21 @@ public class Item {
     private String videoUrl;
     private Integer tradeMode;
     private Long preferPointId;
+    /**
+     * 卖家类型：1=个人卖家，2=平台自营（官方代卖）。
+     *
+     * <p>列 {@code seller_type TINYINT NOT NULL DEFAULT 1} 由 {@code sql/migration-platform.sql} 添加；
+     * 个人商品恒为 1，平台商品由 platform 模块直插为 2。本模块只负责读出并透出到 VO
+     * （首页/搜索/详情的「官方代卖」角标数据源），不参与商品状态机与审核流程。
+     */
+    private Integer sellerType;
+    /**
+     * 平台代卖/自提点 id（仅平台商品有值，个人商品为 null）。
+     *
+     * <p>列 {@code platform_point_id} 同样由 platform 迁移脚本添加。点位名称属于 platform 模块，
+     * 本模块不回表取名（避免 item → platform 的跨模块依赖），VO 里只透出 id。
+     */
+    private Long platformPointId;
     private Integer status;
     private Integer auditResult;
     private String auditReason;
