@@ -1,0 +1,24 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ershou-item-service
+  # 第 5 轮约定：本地配置只留端口/名字/Nacos 地址；数据源、Redis(db2)、RabbitMQ、Seata、MyBatis-Plus
+  # 全部由 Nacos 配置中心下发（dataId=ershou-item-service.yaml，见 ershou-cloud/nacos-configs/）。
+  config:
+    import: optional:nacos:ershou-item-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

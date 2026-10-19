@@ -161,3 +161,28 @@
 2. Web `PublishListView` 只判状态不判 `expireAt` → 无到期时间时文案误导；已补 `&& item.expireAt`。
 3. 8080 是**用户 IDEA 实例**，不能 kill；QA 用独立 18080 + `adb reverse 手机8080→宿主18080` 完成真机验收。
 4. 既有 `ScheduledTasks.flushViewCounts` NPE（双实例共享 Redis 触发）非本轮引入，记 P2。
+
+---
+
+## 九、第 5 轮 · Spring Cloud 微服务重构（演示版）（2026-10-19）
+
+> 需求："用智能体团队把项目用 Spring Cloud 重构，主要做功能和技术演示；Redis 用现有但要数据隔离；数据库要拆分；用 RabbitMQ 优化；选 Nacos、Sentinel、Seata、Spring AMQP、OpenFeign、Spring Cloud Gateway；用 Docker。"
+> 契约：[`第5轮-SpringCloud重构-设计.md`](./第5轮-SpringCloud重构-设计.md) ｜ 验收：[`第5轮-SpringCloud重构-验收.md`](./第5轮-SpringCloud重构-验收.md)
+
+| 任务 | 成员 | 交付 | 状态 |
+| --- | --- | --- | --- |
+| T24 | `platform-dev` | parent + common（12 类）+ Gateway（8 类：路由/Sa-Token/X-User-Id/Sentinel 限流/CORS/TraceId）+ Nacos 配置 4 个 + Seata/分页版本对齐 | ✅ |
+| T25 | `admin-member` | user-service（认证/用户/学校；会话 db0 与单体互通，16/16 断言） | ✅ |
+| T26 | `item-member` | item-service（商品读/缓存/内部库存锁/MQ 消费/分页修复） | ✅ |
+| T27 | `order-member` | order-service（Feign/Seata AT 回滚/MQ 生产/Nacos 动态配置） | ✅ |
+| T28 | `chat-member` | Docker 编排验证 + 建库/迁移 SQL（223 行）+ cloud-up/down + Dockerfile 实构建 + 中间件证据 | ✅ |
+| T29 | `map-member` | 前端接网关（vite env 化 + `.env.cloud`）+ `cloud-demo.ps1`（11/11 PASS）+ demo-script 文档 | ✅ |
+| T30 | `app-member` | cloud README + architecture（4 mermaid）+ migration-roadmap | ✅ |
+| 基础设施/整合 | `lead` | 接手 compose/Seata/Sentinel 镜像与启动、Nacos 发布、Seata 版本裁决、E2E 复核、数据重置、文档收口 | ✅ |
+
+**验收结论**：5 模块 BUILD SUCCESS；Docker 四中间件健康；Nacos 4 服务 + 4 配置；MySQL 三库独立账号（迁移 223 行）；**网关端到端 11/11 步 PASS、29/29 断言**；Seata AT 回滚、RabbitMQ 异步（sale_count+1）、Sentinel 429、Nacos 配置热更新、Redis db0/1/2/3 隔离全部实锤。
+
+**本轮踩坑（已同步开发日志）**
+1. SCA 2023.0.3.2 默认带 Apache Seata 2.1.0，与 Docker 镜像 io.seata 1.8.0 不兼容 → 父工程固定 io.seata 1.8.0 + 排除 org.apache.seata。
+2. Docker Desktop 容器 IP 宿主机不可达 → Seata 客户端 `registry.type=file + grouplist=127.0.0.1:8091`；可选 SEATA_IP 改进已写入 docker README（未启用）。
+3. MyBatis-Plus 3.5.9 分页拆包（`mybatis-plus-jsqlparser`）；Sa-Token 双 Dao（`@Primary` db0）；网关 429 统一 JSON（最高优先级 WebExceptionHandler）；PS 5.1 中文脚本需 UTF-8 BOM。

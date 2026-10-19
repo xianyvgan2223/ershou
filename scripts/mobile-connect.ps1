@@ -18,6 +18,7 @@
     - 8080 后端 API
     - 9010 MinIO 图片（**不转发的话商品图会全部加载失败**）
     - 9011 MinIO 控制台（一般用不到，顺手转）
+    - 8088 Spring Cloud 网关（可选；转发了才能把 App 地址填 `127.0.0.1:8088` 演示微服务）
 
   连好之后在 App 里：**连接页 → 一键扫描**（会识别出"USB 隧道"），或手动填 `127.0.0.1:8080`。
 
@@ -48,7 +49,7 @@ Write-Host "设备 $Phone 已连接" -ForegroundColor Green
 Write-Host ''
 Write-Host '建立 USB 隧道（手机 → 本机）...' -ForegroundColor Cyan
 & $adb reverse --remove-all 2>&1 | Out-Null
-foreach ($p in 8080, 9010, 9011) {
+foreach ($p in 8080, 8088, 9010, 9011) {
   & $adb reverse "tcp:$p" "tcp:$p" 2>&1 | Out-Null
 }
 $list = & $adb reverse --list 2>&1 | Where-Object { $_ -match 'tcp:\d+' }
@@ -64,6 +65,19 @@ if ($apiCode.Trim() -eq '200') {
 } else {
   Write-Host ("  ✗ 后端 API（8080）不可达，HTTP=" + $apiCode + " —— 后端起了吗？") -ForegroundColor Red
   $ok = $false
+}
+
+# 可选：Spring Cloud 网关（8088）——只在本地网关已启动时验证
+$gwLocal = Test-NetConnection -ComputerName 127.0.0.1 -Port 8088 -InformationLevel Quiet -WarningAction SilentlyContinue
+if ($gwLocal) {
+  $gwCode = (& $adb shell "curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/api/v1/items" 2>&1) -join ''
+  if ($gwCode.Trim() -eq '200') {
+    Write-Host '  ✓ Spring Cloud 网关（8088）可达 —— App 地址填 127.0.0.1:8088 即可演示微服务' -ForegroundColor Green
+  } else {
+    Write-Host ("  · Spring Cloud 网关（8088）手机侧 HTTP=" + $gwCode + "（网关可能未起/正在启动，跳过）") -ForegroundColor DarkGray
+  }
+} else {
+  Write-Host '  · Spring Cloud 网关（8088）未启动，跳过（隧道已预留，起了网关即可用）' -ForegroundColor DarkGray
 }
 
 # 取一张真实图片验证 MinIO 隧道（403 是 MinIO 根路径的正常响应，要测具体对象）

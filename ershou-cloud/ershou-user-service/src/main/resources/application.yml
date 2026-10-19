@@ -1,0 +1,30 @@
+# =============================================================
+# ershou-user-service 本地配置（:8081）
+# =============================================================
+# 按第 5 轮设计约定：本地只保留「端口 / 服务名 / Nacos 地址 / config import」，
+# 数据源(ershou_user)、Redis(db1)、Sa-Token、MyBatis-Plus、短信 mock 等全部来自
+# Nacos 配置中心 dataId = ershou-user-service.yaml（演示配置中心能力）。
+#
+# 启动前置：Nacos(8848) 已起 + 该 dataId 已发布；否则服务能启动但缺数据源配置。
+# =============================================================
+server:
+  port: 8081
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: ershou-user-service
+  # 从 Nacos 拉配置（optional: Nacos 不可用时至少能启动进程，便于先验证端口/注册）
+  config:
+    import: optional:nacos:ershou-user-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- 公共包：Result/异常/TraceId/UserContext/工具（被 user/item/order 三个服务依赖）
+       注意：spring-boot-starter-web 设为 optional —— 服务自己声明 web；这样万一以后 gateway
+       也想依赖 common，不会把 Servlet 栈带进 WebFlux 网关。 -->
+  <parent>
+    <groupId>com.ershou.cloud</groupId>
+    <artifactId>ershou-cloud</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>ershou-cloud-common</artifactId>
+  <name>ershou-cloud-common</name>
+  <description>微服务公共包：统一返回/异常/TraceId/用户上下文/工具</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+    <!-- 下面这些对 common 自身编译可见，但不向依赖方传递（服务自己声明运行时所需） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-core</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>cn.dev33</groupId>
+      <artifactId>sa-token-core</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>

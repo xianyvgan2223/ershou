@@ -1,0 +1,59 @@
+# =============================================================
+# Nacos dataId: ershou-user-service.yaml   （group=DEFAULT_GROUP）
+# 用户服务（:8081）：MySQL ershou_user / Redis db1（业务）/ db0（Sa-Token 会话）
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_user?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_user
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      database: 1          # 业务键（验证码/登录限流）落 db1，前缀 ershou:user:
+      timeout: 3s
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# Sa-Token：与单体完全一致；会话落 db0（由 SaTokenRedisConfig 单独连接，业务仍用 db1）
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 315360000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+ershou:
+  cloud:
+    # SaTokenRedisConfig 用：会话库固定 db0（host/port/password 复用 spring.data.redis.*）
+    session-redis-database: 0
+  crypto:
+    phone-key: __REDACTED_PHONE_KEY__
+  sms:
+    mock: true
+    mock-code: "123456"
+    max-per-day: 10
+  admin:
+    role-flag: 8
+
+logging:
+  level:
+    com.ershou.cloud.user: info
+    com.baomidou: warn

@@ -1,0 +1,34 @@
+# =============================================================
+# 通用微服务镜像（演示用）：把一个 Spring Boot fat jar 打进镜像
+# -------------------------------------------------------------
+# 构建上下文必须是 ershou-cloud/ 目录（这样 COPY 的 JAR_FILE 才能落在上下文内）：
+#   cd E:\ershou
+#   docker build -f ershou-cloud/docker/Dockerfile.service ^
+#     --build-arg JAR_FILE=ershou-cloud-gateway/target/ershou-cloud-gateway-1.0.0.jar ^
+#     -t ershou/ershou-gateway:dev ershou-cloud
+#
+# 参数：
+#   BASE_IMAGE  基础镜像（本地只有 eclipse-temurin:17-jre；如已拉 21-jre 可覆盖）
+#   JAR_FILE    相对【构建上下文】的 jar 路径（必填）
+#   APP_PORT    仅用于 EXPOSE 声明（默认 8088=gateway；服务端口实际由配置决定）
+#
+# 说明：服务在宿主机 mvn 启动是主路径；此镜像用于演示「服务也能容器化」，
+#       容器内访问 Nacos 等中间件要用服务名（nacos:8848），不是 127.0.0.1。
+# =============================================================
+ARG BASE_IMAGE=eclipse-temurin:17-jre
+FROM ${BASE_IMAGE}
+
+ARG JAR_FILE
+ARG APP_PORT=8088
+
+WORKDIR /app
+ENV TZ=Asia/Shanghai \
+    JAVA_OPTS=""
+
+COPY ${JAR_FILE} /app/app.jar
+RUN chmod 0644 /app/app.jar
+
+EXPOSE ${APP_PORT}
+
+# 用 sh -c 承接通配 JAVA_OPTS，便于运行时 -e JAVA_OPTS="-Xmx512m"
+ENTRYPOINT ["sh", "-c", "exec java ${JAVA_OPTS} -jar /app/app.jar"]

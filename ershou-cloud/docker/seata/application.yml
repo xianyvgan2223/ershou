@@ -1,0 +1,51 @@
+# =============================================================
+# Seata Server 1.8.0 配置（挂载到容器 /seata-server/resources/application.yml）
+# 该镜像为 Jib 构建，只认 application.yml；registry=nacos，store=file（演示单机）
+# =============================================================
+server:
+  port: 7091
+
+spring:
+  application:
+    name: seata-server
+
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    path: /root/logs/seata
+  extend:
+    logstash-appender:
+      destination: 127.0.0.1:4560
+    kafka-appender:
+      bootstrap-servers: 127.0.0.1:9092
+
+console:
+  user:
+    username: seata
+    password: seata
+
+seata:
+  config:
+    type: file
+  registry:
+    type: nacos
+    nacos:
+      server-addr: nacos:8848
+      application: seata-server
+      namespace: ""
+      group: SEATA_GROUP
+      username: nacos
+      password: nacos
+      context-path: ""
+  store:
+    mode: file
+  server:
+    service-port: 8091
+    service:
+      vgroup-mapping:
+        default: default
+  security:
+    secretKey: __REDACTED_SEATA_SECRET__
+    tokenValidityInMilliseconds: 1800000
+    ignore:
+      urls: /,/**/*.css,/**/*.js,/**/*.html,/**/*.ico,/console-fe/public/**,/api/v1/auth/login

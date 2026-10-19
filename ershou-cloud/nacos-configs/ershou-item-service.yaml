@@ -1,0 +1,88 @@
+# =============================================================
+# Nacos dataId: ershou-item-service.yaml   （group=DEFAULT_GROUP）
+# 商品服务（:8082）：MySQL ershou_item / Redis db2 / RabbitMQ / Seata AT
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_item?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_item
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      database: 2          # 商品缓存/浏览量，前缀 ershou:item:
+      timeout: 3s
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000ms
+        max-attempts: 3
+        multiplier: 2
+    listener:
+      simple:
+        # 演示点：手动 ack（消费方法内 channel.basicAck / basicNack，失败进死信不回队列）
+        acknowledge-mode: manual
+        prefetch: 10
+        default-requeue-rejected: false
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# Seata 客户端（AT，1.8.0）：TM 在 order-service，本服务作为 RM 参与全局事务（undo_log 在 ershou_item）
+seata:
+  enabled: true
+  application-id: ${spring.application.name}
+  tx-service-group: ershou_tx_group
+  service:
+    vgroup-mapping:
+      ershou_tx_group: default
+    # 直连 TC：TC 在 Nacos 注册的是容器 IP（如 172.20.0.x），宿主机不可达；
+    # docker-compose 已把 8091 映射到宿主，客户端用 grouplist 直接连 127.0.0.1:8091（演示环境）
+    grouplist:
+      default: 127.0.0.1:8091
+  registry:
+    # 【演示环境直连 TC】TC 在 Nacos 里注册的是容器 IP（172.20.0.x），Windows 宿主机不可达；
+    # docker-compose 已把 8091 映射到宿主，这里用 registry.type=file + service.grouplist 直连 127.0.0.1:8091。
+    # 若 compose 给 seata 容器加 `SEATA_IP=127.0.0.1`（注册宿主可达 IP），可改回 type=nacos（下方 nacos 配置保留）。
+    type: file
+    nacos:
+      server-addr: 127.0.0.1:8848
+      application: seata-server
+      group: SEATA_GROUP
+      username: nacos
+      password: nacos
+      cluster: default
+  config:
+    type: file
+  data-source-proxy-mode: AT
+
+ershou:
+  item:
+    # Nacos 动态配置演示点：改这里（如 page-max=20）不重启，@RefreshScope 下一请求生效
+    detail-cache-seconds: 60
+    page-max: 100
+
+logging:
+  level:
+    com.ershou.cloud.item: info
+    com.baomidou: warn
+    com.alibaba.nacos: warn

@@ -1,0 +1,19 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: ershou-gateway
+  # 第 5 轮约定（设计第三节 / Lead 派工）：本地 application.yml 只保留
+  # 「端口 / 服务名 / Nacos 地址 / config import」。
+  # Redis(db0)、Sa-Token、Sentinel、路由参数、management 全部来自 Nacos dataId=ershou-gateway.yaml。
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml
+  config:
+    import: optional:nacos:ershou-gateway.yaml?group=DEFAULT_GROUP&refreshEnabled=true

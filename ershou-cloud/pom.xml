@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- 第 5 轮 · Spring Cloud 微服务演示版父工程
+       版本矩阵：Spring Boot 3.3.5 / Spring Cloud 2023.0.3 / Spring Cloud Alibaba 2023.0.3.2 / Java 21
+       依赖版本统一在这里管理，各服务 pom.xml 只声明 artifactId（新增依赖找 platform-dev 统一加）。 -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.ershou.cloud</groupId>
+  <artifactId>ershou-cloud</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <name>ershou-cloud</name>
+  <description>校园二手交易平台 · Spring Cloud 微服务演示版（Nacos/Sentinel/Seata/RabbitMQ/Gateway）</description>
+
+  <modules>
+    <module>ershou-cloud-common</module>
+    <module>ershou-cloud-gateway</module>
+    <module>ershou-user-service</module>
+    <module>ershou-item-service</module>
+    <module>ershou-order-service</module>
+  </modules>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!-- 版本矩阵（2023.0.3 / 2023.0.3.2 的依赖均由本地已解析的 BOM 管理） -->
+    <spring-cloud.version>2023.0.3</spring-cloud.version>
+    <spring-cloud-alibaba.version>2023.0.3.2</spring-cloud-alibaba.version>
+    <mybatis-plus.version>3.5.9</mybatis-plus.version>
+    <sa-token.version>1.39.0</sa-token.version>
+    <!-- Seata 客户端版本：与设计版本矩阵 / docker-compose 的 seata-server 1.8.0 对齐。
+         ⚠️ SCA 2023.0.3.2 的 spring-cloud-starter-alibaba-seata 默认带 org.apache.seata:2.1.0，
+         与服务端 1.8.0 大版本不兼容（且 SCA starter 自身字节码引用的仍是 io.seata 1.x API），
+         所以 item/order 服务对 SCA starter 排除 org.apache.seata，显式依赖 io.seata:1.8.0。 -->
+    <seata.version>1.8.0</seata.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring Cloud BOM -->
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- Spring Cloud Alibaba BOM（nacos-client 2.4.2 / sentinel 1.8.8 / seata 2.1.0） -->
+      <dependency>
+        <groupId>com.alibaba.cloud</groupId>
+        <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+        <version>${spring-cloud-alibaba.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- MyBatis-Plus（与单体 3.5.9 保持一致；Spring Cloud BOM 不管它，这里显式管） -->
+      <dependency>
+        <groupId>com.baomidou</groupId>
+        <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        <version>${mybatis-plus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.baomidou</groupId>
+        <artifactId>mybatis-plus-jsqlparser</artifactId>
+        <version>${mybatis-plus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.baomidou</groupId>
+        <artifactId>mybatis-plus-core</artifactId>
+        <version>${mybatis-plus.version}</version>
+      </dependency>
+
+      <!-- Sa-Token（1.39.0，与单体同版本：共享 Redis db0 才能登录态互通） -->
+      <dependency>
+        <groupId>cn.dev33</groupId>
+        <artifactId>sa-token-spring-boot3-starter</artifactId>
+        <version>${sa-token.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.dev33</groupId>
+        <artifactId>sa-token-reactor-spring-boot3-starter</artifactId>
+        <version>${sa-token.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.dev33</groupId>
+        <artifactId>sa-token-redis-jackson</artifactId>
+        <version>${sa-token.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.dev33</groupId>
+        <artifactId>sa-token-core</artifactId>
+        <version>${sa-token.version}</version>
+      </dependency>
+
+      <!-- Seata 客户端：统一 1.8.0（SCA starter 里排掉 org.apache.seata 2.1.0 后再显式依赖 io.seata） -->
+      <dependency>
+        <groupId>io.seata</groupId>
+        <artifactId>seata-spring-boot-starter</artifactId>
+        <version>${seata.version}</version>
+      </dependency>
+
+      <!-- 内部公共包 -->
+      <dependency>
+        <groupId>com.ershou.cloud</groupId>
+        <artifactId>ershou-cloud-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <!-- 需要可执行 jar 的模块（gateway，以及后续有 main class 的服务）在各自 pom 里声明本插件；
+             骨架阶段 3 个服务模块还没有 main class，暂不声明，避免 repackage 找不到主类。 -->
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <configuration>
+            <excludes>
+              <exclude>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+              </exclude>
+            </excludes>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

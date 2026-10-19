@@ -1,0 +1,59 @@
+# =============================================================
+# Nacos dataId: ershou-gateway.yaml   （group=DEFAULT_GROUP）
+# 网关（:8088）运行配置：Redis db0（与单体/ user-service 共享 Sa-Token 会话）、
+# Sa-Token、Sentinel Dashboard、绞杀者路由参数。
+# 发布方式见 ershou-cloud/docker/README.md 或 scripts/cloud-up.ps1 的 nacos 配置步骤。
+# =============================================================
+spring:
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      database: 0          # 唯一允许跨服务共用的库：Sa-Token 会话（与单体 8080 互通）
+      timeout: 3s
+  cloud:
+    sentinel:
+      eager: true
+      transport:
+        dashboard: 127.0.0.1:8858
+        port: 8720
+    gateway:
+      # 路由在 GatewayRoutesConfig 代码里定义（演示可读性），这里只放可动态调整的参数
+      discovery:
+        locator:
+          enabled: false
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 10s
+
+# Sa-Token：与单体 application.yml 完全一致，保证同一 token 在 8080/8088/8081 间互通
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 315360000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+# 绞杀者路由参数（GatewayRoutesConfig 读取；改这里可把单体地址切到别的机器）
+ershou:
+  gateway:
+    legacy-uri: http://127.0.0.1:8080
+    ws-uri: ws://127.0.0.1:8080
+    # GET /api/v1/items 网关限流 QPS（SentinelGatewayConfig 读取，演示可改）
+    item-qps: 5
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+
+logging:
+  level:
+    com.ershou.cloud.gateway: info
+    com.alibaba.nacos: warn
+    com.alibaba.csp.sentinel: info

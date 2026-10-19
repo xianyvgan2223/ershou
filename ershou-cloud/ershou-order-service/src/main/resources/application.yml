@@ -1,0 +1,22 @@
+# 面交单微服务（:8083）本地配置
+# 约定（设计第三节）：本地 application.yml 只保留 端口 / 服务名 / Nacos 地址 / spring.config.import，
+# 其余（datasource ershou_order、Redis db3、RabbitMQ、Seata client、Feign+Sentinel、业务参数
+# ershou.order.max-qty）全部来自 Nacos 配置中心 dataId：ershou-order-service.yaml
+server:
+  port: 8083
+
+spring:
+  application:
+    name: ershou-order-service
+  # 配置中心演示点：改 Nacos 里的配置可热更新（refreshEnabled=true）
+  config:
+    import: optional:nacos:ershou-order-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        # 本机演示：注册 IP 固定走 127.0.0.1，避免多网卡时注册到 Docker/WSL 虚拟网卡导致 Feign 调不通
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}

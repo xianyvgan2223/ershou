@@ -284,6 +284,29 @@ curl.exe "http://127.0.0.1:9211/ershou_item/_count?q=status:2"       # ↔ ... W
 
 **移动端平台严选**（Flutter App，第 4 轮新增）：`ershou_app/lib/ui/pages/platform_page.dart` —— Hero 统计卡（在售平台商品/代卖点/可领券）+ 代卖点 chips 筛选 + 限时秒杀（每秒倒计时/秒杀价/库存进度/抢购四态）+ 优惠券领取 + 严选好物 2 列网格（分页/下拉刷新/空态/错误重试）；首页顶栏金色「严选」入口，商品卡显示金色「官方代卖」角标，详情页有官方徽章。数据层为 `platform_models.dart` + `platform_repository.dart`，复用第 2 轮后端接口；已有真机（KOZ-AL00）实测截图。
 
+## 三·五、Spring Cloud 微服务架构（演示版，2026-10-19）
+
+> 工程目录：`ershou-cloud/` ｜ 启动手册：[`ershou-cloud/README.md`](ershou-cloud/README.md) ｜ 架构图：[`docs/architecture.md`](ershou-cloud/docs/architecture.md) ｜ 演示剧本：[`docs/demo-script.md`](ershou-cloud/docs/demo-script.md) ｜ 迁移路线：[`docs/migration-roadmap.md`](ershou-cloud/docs/migration-roadmap.md) ｜ 验收报告：[`第5轮-SpringCloud重构-验收.md`](智能体团队/第5轮-SpringCloud重构-验收.md)
+
+采用**绞杀者模式**：旧单体 `ershou-server` 继续在 **8080** 运行并承载未迁移模块；新微服务从核心链路逐步接管，统一入口为 **Gateway 8088**，**前端无需改代码**（Web 改代理端口、App 填 `host:8088`）。
+
+| 服务/中间件 | 端口 | 说明 |
+| --- | --- | --- |
+| `ershou-gateway` | **8088** | Spring Cloud Gateway：Sa-Token 鉴权（共享 Redis db0）+ Sentinel 限流 + 路由/反代 |
+| `ershou-user-service` | 8081 | 认证/用户/学校校区（MySQL `ershou_user`、Redis db1） |
+| `ershou-item-service` | 8082 | 商品读/缓存/内部库存/AMQP 消费（MySQL `ershou_item`、Redis db2） |
+| `ershou-order-service` | 8083 | 面交单 + OpenFeign + **Seata AT** + MQ 生产（MySQL `ershou_order`、Redis db3） |
+| 旧单体 `ershou-server` | 8080 | 未迁移模块（chat/admin/map/platform/search/cart 等），由网关反代 |
+| Nacos / RabbitMQ / Seata / Sentinel | 8848 / 5672·15672 / 8091·7091 / 8858 | `ershou-cloud/docker/docker-compose.yml`（Docker，`scripts/cloud-up.ps1` 一键起） |
+
+**一键演示**：
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\cloud-up.ps1          # 中间件 + Nacos 配置 + 冒烟
+powershell -ExecutionPolicy Bypass -File .\scripts\cloud-demo.ps1        # 经网关 11 步端到端断言
+cd ershou-web; npm run dev -- --mode cloud                               # 前端切到 8088
+```
+**实测结果**：11/11 步 PASS（登录→用户→商品→下单→我的面单→**Seata 回滚**→**RabbitMQ 异步**→**Sentinel 429**→旧路径反代），MySQL 三库独立账号、Redis 按 db 隔离（db0 仅会话）、Nacos 配置热生效。
+
 ## 四、关键验证结果
 
 ### 平台代卖（2026-10-17 独立验收，`智能体团队/第2轮-平台代卖-验收.md`）
