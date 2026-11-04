@@ -9,9 +9,6 @@ import com.ershou.campus.common.cache.DictionaryCache;
 import com.ershou.campus.common.util.PhoneCrypto;
 import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.module.admin.service.AdminAuthService;
-import com.ershou.campus.module.ai.AuditDecision;
-import com.ershou.campus.module.ai.AuditResult;
-import com.ershou.campus.module.ai.ContentAuditService;
 import com.ershou.campus.module.item.entity.Item;
 import com.ershou.campus.module.item.mapper.ItemMapper;
 import com.ershou.campus.module.school.entity.Campus;
@@ -53,7 +50,6 @@ public class UserService {
     private final AdminAuthService adminAuthService;
     private final UserBlockService userBlockService;
     private final ItemMapper itemMapper;
-    private final ContentAuditService contentAuditService;
 
     @Value("${ershou.sms.mock:true}")
     private boolean smsMock;
@@ -218,7 +214,6 @@ public class UserService {
             if (nickname.isEmpty()) {
                 throw new BizException(ResultCode.PARAM_ERROR, "昵称不能为空");
             }
-            auditProfileText(nickname, "昵称");
             update.set(SysUser::getNickname, nickname);
             changed = true;
         }
@@ -231,7 +226,6 @@ public class UserService {
             if (shopName.isEmpty()) {
                 update.set(SysUser::getShopName, null);
             } else {
-                auditProfileText(shopName, "小铺名称");
                 update.set(SysUser::getShopName, shopName);
             }
             changed = true;
@@ -296,15 +290,6 @@ public class UserService {
             throw new BizException(ResultCode.PARAM_ERROR, "头像地址不合法，请重新上传");
         }
         return avatar;
-    }
-
-    /** 资料类文本审核：命中禁售/违禁词直接拒绝；可疑词由审核服务自己记日志，不挡用户改资料 */
-    private void auditProfileText(String text, String label) {
-        AuditResult result = contentAuditService.auditText(text, "profile");
-        if (result.decision() == AuditDecision.BLOCK) {
-            log.warn("[user][profile] {}被拦截：{}", label, result.reason());
-            throw new BizException(ResultCode.CONTENT_VIOLATION, label + result.reason());
-        }
     }
 
     public UserVO toVO(SysUser user, boolean isNewUser) {

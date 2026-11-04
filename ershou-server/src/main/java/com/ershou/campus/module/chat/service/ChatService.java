@@ -7,9 +7,6 @@ import com.ershou.campus.common.result.ResultCode;
 import com.ershou.campus.common.util.ContentCipher;
 import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.module.admin.vo.BatchAuditResultVO;
-import com.ershou.campus.module.ai.AuditDecision;
-import com.ershou.campus.module.ai.AuditResult;
-import com.ershou.campus.module.ai.ContentAuditService;
 import com.ershou.campus.module.chat.config.ChatProperties;
 import com.ershou.campus.module.chat.entity.ChatMessage;
 import com.ershou.campus.module.chat.entity.ChatSession;
@@ -66,9 +63,7 @@ public class ChatService {
     private final ChatMessageMapper messageMapper;
     private final ItemMapper itemMapper;
     private final UserService userService;
-    private final ContentAuditService auditService;
     private final ChatPushService pushService;
-    private final ChatRiskRecorder riskRecorder;
     private final UserBlockService blockService;
     private final ContentCipher cipher;
     private final StringRedisTemplate redis;
@@ -390,15 +385,8 @@ public class ChatService {
 
         checkDailyLimit(senderId);
 
-        AuditResult audit = props.isAuditEnabled()
-                ? auditService.auditText(content, "chat")
-                : AuditResult.pass();
-        if (audit.decision() == AuditDecision.BLOCK) {
-            // 留痕走独立事务：下面这行抛出后本事务回滚，但证据必须留在库里
-            riskRecorder.recordBlocked(session, senderId, receiverId, type, content, audit.reason());
-            throw new BizException(ResultCode.RISK_BLOCKED, audit.reason());
-        }
-        int riskLevel = audit.decision() == AuditDecision.REVIEW ? RISK_REVIEW : RISK_NONE;
+        // 关键词机审已移除：消息直接放行
+        int riskLevel = RISK_NONE;
 
         ChatMessage message = new ChatMessage();
         message.setSessionId(sessionId);
@@ -429,9 +417,6 @@ public class ChatService {
         incrementUnread(session, receiverId);
 
         ChatMessageVO vo = toMessageVO(message, senderId, clientMsgId);
-        if (riskLevel >= RISK_REVIEW) {
-            vo.setRiskWarning(audit.reason());
-        }
         // 推给对方：本机直推 + 跨实例广播
         pushService.push(receiverId, "message", toMessageVO(message, receiverId, null));
         log.info("[chat][send][{}->{}] session={} type={} risk={}", senderId, receiverId, sessionId, type, riskLevel);

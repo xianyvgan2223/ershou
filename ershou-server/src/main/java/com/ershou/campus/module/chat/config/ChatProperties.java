@@ -42,9 +42,6 @@ public class ChatProperties {
     /** 撤回时限：只能撤回自己这段时间内发出的消息 */
     private Duration recallWindow = Duration.ofMinutes(2);
 
-    /** 是否对私聊内容做机审（PRD FR-IM-04 聊天风控） */
-    private boolean auditEnabled = true;
-
     /** 快捷话术（PRD FR-IM-02：卖家侧内置；后续支持商家自定义） */
     private List<String> quickReplies = List.of(
             "还在的", "可小刀", "支持当面验货", "XX 点见面可以吗", "已出，抱歉");

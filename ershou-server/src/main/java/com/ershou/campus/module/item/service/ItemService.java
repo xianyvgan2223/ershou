@@ -12,9 +12,6 @@ import com.ershou.campus.common.result.PageResult;
 import com.ershou.campus.common.result.ResultCode;
 import com.ershou.campus.common.util.RedisKeys;
 import com.ershou.campus.common.util.TxHooks;
-import com.ershou.campus.module.ai.AuditDecision;
-import com.ershou.campus.module.ai.AuditResult;
-import com.ershou.campus.module.ai.ContentAuditService;
 import com.ershou.campus.module.admin.entity.ItemReview;
 import com.ershou.campus.module.admin.service.ItemReviewService;
 import com.ershou.campus.module.cart.entity.Favorite;
@@ -61,7 +58,6 @@ public class ItemService {
     private final ItemMapper itemMapper;
     private final FavoriteMapper favoriteMapper;
     private final UserService userService;
-    private final ContentAuditService auditService;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final ItemSearchService itemSearchService;
@@ -315,15 +311,8 @@ public class ItemService {
             }
         }
 
-        // AI 机审：禁售词直接拦截，可疑词转人工
-        AuditResult audit = auditService.auditText(dto.getTitle() + " " + (dto.getDescription() == null ? "" : dto.getDescription()), "item");
+        // 关键词机审已移除：发布直接进入在售(2)，由运营「上架审核」页事后确认
         int status = 2;
-        if (audit.decision() == AuditDecision.BLOCK) {
-            throw new BizException(ResultCode.CONTENT_VIOLATION, audit.reason());
-        }
-        if (audit.decision() == AuditDecision.REVIEW) {
-            status = 1;
-        }
 
         Item item = new Item();
         item.setSellerId(userId);
@@ -348,8 +337,6 @@ public class ItemService {
         // 平台商品不经这里——由 platform 模块直插 seller_type=2（本方法不接收 sellerType 入参）。
         item.setSellerType(1);
         item.setStatus(status);
-        item.setAuditResult(audit.decision() == AuditDecision.PASS ? 1 : null);
-        item.setAuditReason(audit.reason());
         // 限时关闭时不写过期时间（expire_at 为 NULL = 永久有效）；INSERT 对 null 字段走 NOT_NULL
         // 策略会直接省略该列，DB 默认值本来就是 NULL，所以这里不需要额外处理。
         item.setExpireAt(validityEnabled ? LocalDateTime.now().plusDays(validDays) : null);
@@ -412,23 +399,8 @@ public class ItemService {
 
         Integer newStatus = item.getStatus();
         if (textChanged) {
-            AuditResult audit = auditService.auditText(
-                    newTitle + " " + (newDescription == null ? "" : newDescription), "item");
-            if (audit.decision() == AuditDecision.BLOCK) {
-                throw new BizException(ResultCode.CONTENT_VIOLATION, audit.reason());
-            }
-            update.setAuditReason(audit.reason());
-            if (audit.decision() == AuditDecision.REVIEW) {
-                newStatus = 1;
-                update.setAuditResult(null);
-            } else {
-                update.setAuditResult(1);
-                // 原来是「审核中」的商品，这次过了就放出去
-                if (item.getStatus() != null && item.getStatus() == 1) {
-                    newStatus = 2;
-                }
-            }
-            update.setStatus(newStatus);
+            // 关键词机审已移除：内容修改不改状态，由运营「上架审核」页事后确认
+            update.setAuditResult(1);
         }
 
         if (StringUtils.hasText(dto.getTitle())) {
