@@ -13,13 +13,16 @@ import {
   Shop,
   ShoppingCart,
   Star,
+  Sunny,
   Tickets,
   User,
+  Moon,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { useMeetupStore } from '@/stores/meetup'
 import { useCartStore } from '@/stores/cart'
+import { useTheme } from '@/composables/useTheme'
 import { nameInitial } from '@/utils/format'
 
 const route = useRoute()
@@ -27,6 +30,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const chatStore = useChatStore()
 const meetupStore = useMeetupStore()
+const { isDark, toggleTheme } = useTheme()
 // 购物车件数收敛到 store：加入购物车 / 结算后都会 refresh，红点不再"只在挂载时算一次"
 const cartStore = useCartStore()
 const cartCount = computed(() => cartStore.count)
@@ -184,6 +188,15 @@ watch(
         </nav>
 
         <div class="header__actions">
+          <el-tooltip :content="isDark ? '切换为日间模式' : '切换为夜间模式'" placement="bottom">
+            <el-button
+              class="theme-toggle"
+              circle
+              :icon="isDark ? Sunny : Moon"
+              :aria-label="isDark ? '切换为日间模式' : '切换为夜间模式'"
+              @click="toggleTheme"
+            />
+          </el-tooltip>
           <el-button class="btn-publish" :icon="Plus" round @click="router.push('/publish')">
             <span class="btn-publish__text">发布闲置</span>
           </el-button>
@@ -269,7 +282,7 @@ watch(
   // 仍低于 Element Plus 的弹层（popper / dialog / message 都是 2000+）。
   z-index: 1000;
   border-bottom: 1px solid var(--line);
-  background: rgb(255 255 255 / 88%);
+  background: var(--header-bg);
   backdrop-filter: saturate(180%) blur(12px);
 
   &__inner {
@@ -294,7 +307,7 @@ watch(
 
       &:hover,
       &.is-focus {
-        background: #fff;
+        background: var(--surface);
         box-shadow: 0 0 0 1px var(--brand-300) inset;
       }
     }
@@ -306,6 +319,20 @@ watch(
     gap: 10px;
     margin-left: auto;
     white-space: nowrap;
+  }
+}
+
+.theme-toggle {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--text-2);
+  transition: all 0.18s ease;
+
+  &:hover,
+  &:focus {
+    border-color: var(--brand-300);
+    background: var(--brand-50);
+    color: var(--brand-700);
   }
 }
 
@@ -455,7 +482,7 @@ watch(
 .footer {
   margin-top: auto;
   border-top: 1px solid var(--line);
-  background: #fff;
+  background: var(--footer-bg);
 
   &__inner {
     display: flex;

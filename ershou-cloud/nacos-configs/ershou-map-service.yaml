@@ -1,0 +1,88 @@
+# =============================================================
+# Nacos dataId: ershou-map-service.yaml    (group=DEFAULT_GROUP)
+# 地图服务（:8085）：MySQL ershou_map / Redis db5 / Feign+Sentinel / AMap key
+# 契约：ershou-cloud/docs/full-split-contract.md（本地 application.yml 只留端口/Nacos 地址）
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_map?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_map
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      database: 5          # 地图点位缓存 + Redis GEO，前缀 ershou:map:（本服务独占 db5）
+      timeout: 3s
+  cloud:
+    sentinel:
+      eager: true
+      transport:
+        dashboard: 127.0.0.1:8858
+        port: 8725
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# OpenFeign + Sentinel 降级：item-service / user-service 不可用时返回统一错误码（业务层再降级，不 500）
+feign:
+  sentinel:
+    enabled: true
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  httpclient:
+    enabled: true
+
+ershou:
+  map:
+    cache-enabled: true
+    # 点位基础列表缓存（本库数据，版本号失效）
+    cache-seconds: 60
+    # 点位商品统计缓存（Feign item-service；短 TTL 保证下单/下架后地图数字尽快一致）
+    item-stats-cache-seconds: 10
+    geo-index-hours: 6
+    geo-rebuild-lock-seconds: 30
+    # 空点位清理：默认关闭（安全阀）。原因：item-service count-by-point 当前只给"在售(status=2)"数，
+    # 拿不到单体口径的"还有戏(0/1/2/3)"，自动清理可能误删"只挂审核中/锁定商品"的老点位。
+    # 待 item-service 补齐活跃口径后再打开；admin 手动 POST /inner/points/cleanup-empty 仍可用（运营显式触发）。
+    cleanup-enabled: false
+    cleanup-cron: "0 10 3 * * ?"
+    cleanup-grace-days: 7
+    # 校区底图配置来自 user-service（campus 表在 ershou_user 库）；演示环境只有一个学校
+    default-school-id: 1
+    campus-cache-seconds: 600
+    # 拉取校区失败后的重试间隔（负缓存不能 600s，否则 user-service 晚起会导致地图长时间退化）
+    campus-failure-retry-seconds: 10
+    nearby-default-radius: 500
+    nearby-max-radius: 5000
+    nearby-default-limit: 20
+    nearby-max-limit: 50
+  amap:
+    # 从单体配置迁移（单体 application.yml 的阿 env: AMAP_JS_KEY / AMAP_JS_SECURITY_CODE）
+    js-key: "__REDACTED_AMAP_KEY__"
+    js-security-code: "__REDACTED_AMAP_SECURITY_CODE__"
+    # Web 服务 key（restapi.amap.com 逆地理反查用，需厂台绑 IP 白名单）。单体 .env 未配置 → 留空：
+    # /api/v1/map/regeo 返回空候选（前端退化为手动填名称），不影响地图气泡与选点。
+    web-key: ""
+
+logging:
+  level:
+    com.ershou.cloud.map: info
+    com.baomidou: warn
+    com.alibaba.nacos: warn

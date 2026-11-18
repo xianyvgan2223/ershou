@@ -159,7 +159,7 @@ async function toggleFavorite(): Promise<void> {
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow-xs);
   cursor: pointer;
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease;

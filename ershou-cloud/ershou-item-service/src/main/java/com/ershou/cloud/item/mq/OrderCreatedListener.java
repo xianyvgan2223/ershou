@@ -1,8 +1,8 @@
 package com.ershou.cloud.item.mq;
 
-import com.ershou.cloud.item.config.ItemCacheKeys;
 import com.ershou.cloud.item.config.RabbitConfig;
 import com.ershou.cloud.item.mapper.ItemMapper;
+import com.ershou.cloud.item.support.RedisKeys;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
@@ -52,7 +52,7 @@ public class OrderCreatedListener {
             int quantity = Math.max(node.path("quantity").asInt(1), 1);
             String buyerId = node.hasNonNull("buyerId") ? node.path("buyerId").asText() : "?";
 
-            idemKey = ItemCacheKeys.mqOrder(orderId);
+            idemKey = RedisKeys.mqOrder(orderId);
             Boolean first = redis.opsForValue().setIfAbsent(idemKey, "1", Duration.ofHours(24));
             if (!Boolean.TRUE.equals(first)) {
                 log.info("[mq][order-created][dup] orderId={} 已消费过，跳过并 ack", orderId);
@@ -62,7 +62,7 @@ public class OrderCreatedListener {
 
             int rows = itemMapper.incrSaleCount(itemId, quantity);
             // 销量变化与库存变化都会影响详情展示，清掉 db2 详情缓存
-            redis.delete(ItemCacheKeys.itemDetail(itemId));
+            redis.delete(RedisKeys.itemDetail(itemId));
             if (rows == 0) {
                 log.warn("[mq][order-created] orderId={} itemId={} 商品不存在，sale_count 未累加（照常 ack 防毒消息）",
                         orderId, itemId);

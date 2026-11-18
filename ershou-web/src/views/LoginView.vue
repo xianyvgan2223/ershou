@@ -2,14 +2,16 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Iphone, Lock, Location, ShoppingBag, Star } from '@element-plus/icons-vue'
+import { Iphone, Lock, Location, Moon, ShoppingBag, Star, Sunny } from '@element-plus/icons-vue'
 import { sendSmsCode } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 import { DEFAULT_CAMPUS_ID, DEFAULT_SCHOOL_ID, DEV_SMS_CODE } from '@/utils/constants'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { isDark, toggleTheme } = useTheme()
 
 const phone = ref('')
 const code = ref('')
@@ -90,6 +92,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="login">
+    <el-tooltip :content="isDark ? '切换为日间模式' : '切换为夜间模式'" placement="bottom">
+      <el-button
+        class="login__theme"
+        circle
+        :icon="isDark ? Sunny : Moon"
+        :aria-label="isDark ? '切换为日间模式' : '切换为夜间模式'"
+        @click="toggleTheme"
+      />
+    </el-tooltip>
     <div class="login__panel">
       <!-- 左侧品牌区 -->
       <aside class="brand-panel">
@@ -163,6 +174,16 @@ onBeforeUnmount(() => {
   padding: 24px;
   background: var(--bg);
 
+  &__theme {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 20;
+    border-color: var(--line-strong);
+    background: var(--surface);
+    color: var(--text-2);
+  }
+
   &__panel {
     display: grid;
     overflow: hidden;
@@ -170,7 +191,7 @@ onBeforeUnmount(() => {
     max-width: 960px;
     border: 1px solid var(--line);
     border-radius: 22px;
-    background: #fff;
+    background: var(--surface);
     box-shadow: var(--shadow-lg);
     grid-template-columns: 1.05fr 1fr;
   }

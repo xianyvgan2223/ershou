@@ -1,0 +1,30 @@
+# =============================================================
+# Nacos dataId: ershou-file-service.yaml      group=DEFAULT_GROUP
+# 文件服务（:8089）：MinIO 存储配置（无数据库 / 无 Redis / 无 Sa-Token）。
+#
+# 发布方式：scripts/cloud-publish-config.ps1 会把 ershou-cloud/nacos-configs/*.yaml
+#           全部推送到 Nacos（dataId = 文件名）；也可手工在 Nacos 控制台新建。
+# 说明：演示环境 MinIO 为既有容器 ershou-minio（宿主 9010 → 容器 9000），
+#       浏览器/App 通过 http://127.0.0.1:9010/ershou/<key> 访问公开图片；
+#       secret-key 为演示值，生产应改为环境变量/密钥管理（不要提交真实凭据）。
+# =============================================================
+ershou:
+  storage:
+    mode: minio
+    endpoint: http://127.0.0.1:9010
+    access-key: ershou
+    secret-key: __REDACTED_DB_PASSWORD__
+    bucket: ershou
+    public-base-url: http://127.0.0.1:9010/ershou
+    max-size-mb: 5
+    image-max-edge: 1280
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.ershou.cloud.file: info

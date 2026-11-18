@@ -860,7 +860,7 @@ onMounted(async () => {
   grid-template-columns: 300px 1fr;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow-xs);
 
   &__list {

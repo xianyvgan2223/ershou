@@ -1,0 +1,21 @@
+# 私聊微服务（:8084）本地配置
+# 约定（full-split-contract 第二节）：本地 application.yml 只保留端口 / 服务名 / Nacos 地址 / spring.config.import；
+# 其余（datasource ershou_chat、Redis db4、Sa-Token db0、MyBatis-Plus、Feign+Sentinel、业务参数 ershou.chat.*）
+# 全部来自 Nacos 配置中心 dataId=ershou-chat-service.yaml
+server:
+  port: 8084
+
+spring:
+  application:
+    name: ershou-chat-service
+  config:
+    import: optional:nacos:ershou-chat-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        # 本机演示：注册 IP 固定 127.0.0.1，避免多网卡注册到 Docker/WSL 虚拟网卡导致 Feign 调不通
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}

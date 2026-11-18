@@ -6,44 +6,69 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 面交单返回结构（设计 4.4：返回 {@code Result<OrderVO>}，含 orderId/orderNo/itemId/商品信息/status）。
- *
- * <p>字段与单体 {@code OrderVO} 的核心子集对齐，前端「我的面交」页面可直接复用。
+ * 面交单 VO（第 103 轮全量拆分：字段与旧单体 {@code module.order.vo.OrderVO} 完全对齐，
+ * 前端「我的面交」/私聊交易卡片零改动）。
  */
 @Data
 public class OrderVO {
 
-    /** 订单 id（JSON 里同时给 id 与 orderId，兼容前端两种叫法） */
+    /** 订单 id（同时给 id 与 orderId，兼容前端两种叫法） */
     private Long id;
 
     private Long orderId;
 
     private String orderNo;
 
+    private String batchNo;
+
     private Long itemId;
 
-    /** 商品标题：优先用 Feign 实时数据（演示服务间拼装），Feign 不可用时用下单快照 */
+    /** 商品标题：优先用 item-service 实时数据，降级用下单快照 */
     private String itemTitle;
 
     /** 商品封面：同上 */
     private String itemCover;
 
-    private Long buyerId;
-
-    private Long sellerId;
-
     private Integer quantity;
 
     private BigDecimal dealPrice;
 
-    /** 2=待面交（本切片创建即 2；1 待卖家确认在单体流程里） */
+    private Long pointId;
+
+    private String pointName;
+
+    private String pointGuide;
+
+    private LocalDateTime timeSlotStart;
+
+    private LocalDateTime timeSlotEnd;
+
     private Integer status;
 
     private String statusText;
 
-    private Long pointId;
+    private Long buyerId;
+
+    private String buyerName;
+
+    private Long sellerId;
+
+    private String sellerName;
 
     private String remark;
 
+    /** 取消/失效原因（终态单前端红条展示） */
+    private String cancelReason;
+
     private LocalDateTime createdAt;
+
+    private LocalDateTime verifiedAt;
+
+    /** 买家点过「我收到了」（只留痕，成交由卖家确认；平台单买家确认即完成） */
+    private Boolean buyerConfirmed;
+
+    private Boolean sellerConfirmed;
+
+    /** 当前登录者在该单中的角色：buyer / seller（管理端/内部接口为 null） */
+    private String myRole;
 }

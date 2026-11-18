@@ -7,9 +7,11 @@ import {
   DataLine,
   Goods,
   List,
+  Moon,
   Place,
   Refresh,
   Shop,
+  Sunny,
   SwitchButton,
   Ticket,
   Timer,
@@ -17,6 +19,7 @@ import {
 import { fetchCampuses } from '@/api/school'
 import type { Campus } from '@/api/school'
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 import { DEFAULT_CAMPUS_ID, DEFAULT_SCHOOL_ID } from '@/utils/constants'
 import { showTip } from '@/utils/feedback'
 
@@ -58,6 +61,7 @@ const CAMPUS_STORAGE_KEY = 'ershou:console:campusId'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { isDark, toggleTheme } = useTheme()
 
 const campuses = ref<Campus[]>([])
 
@@ -180,6 +184,14 @@ onMounted(loadCampuses)
           <p class="pc__subtitle">{{ pageDesc }}</p>
         </div>
         <div class="pc__top-right">
+          <el-tooltip :content="isDark ? '切换为日间模式' : '切换为夜间模式'" placement="bottom">
+            <el-button
+              circle
+              :icon="isDark ? Sunny : Moon"
+              :aria-label="isDark ? '切换为日间模式' : '切换为夜间模式'"
+              @click="toggleTheme"
+            />
+          </el-tooltip>
           <el-select
             v-model="campusId"
             class="pc__campus"
@@ -240,7 +252,7 @@ onMounted(loadCampuses)
   display: flex;
   height: 100vh;
   overflow: hidden;
-  background: #f1f5f9;
+  background: var(--bg);
   color: var(--text-1);
 }
 
@@ -422,7 +434,7 @@ onMounted(loadCampuses)
   height: 64px;
   padding: 0 32px;
   border-bottom: 1px solid var(--line);
-  background: rgb(255 255 255 / 82%);
+  background: var(--header-bg);
   backdrop-filter: blur(8px);
 }
 

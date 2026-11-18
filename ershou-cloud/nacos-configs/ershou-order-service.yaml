@@ -1,6 +1,7 @@
 # =============================================================
 # Nacos dataId: ershou-order-service.yaml   （group=DEFAULT_GROUP）
-# 订单服务（:8083）：MySQL ershou_order / Redis db3 / RabbitMQ / Seata TM / Feign+Sentinel
+# 交易域微服务（:8083）：MySQL ershou_order / Redis db3 / RabbitMQ / Seata TM / Feign+Sentinel
+# 负责：购物车 / 收藏 / 面交单全状态机 / 信用分流水；对 item-service、user-service、map-service 走 Feign
 # =============================================================
 spring:
   datasource:
@@ -47,7 +48,7 @@ mybatis-plus:
     db-config:
       id-type: auto
 
-# Seata 全局事务（TM 在本服务；Feign 调 item-service 的锁库存作为 AT 分支）
+# Seata 全局事务（TM 在本服务；Feign 调 item-service 的锁库/售出作为 AT 分支）
 seata:
   enabled: true
   application-id: ${spring.application.name}
@@ -60,9 +61,6 @@ seata:
     grouplist:
       default: 127.0.0.1:8091
   registry:
-    # 【演示环境直连 TC】TC 在 Nacos 里注册的是容器 IP（172.20.0.x），Windows 宿主机不可达；
-    # docker-compose 已把 8091 映射到宿主，这里用 registry.type=file + service.grouplist 直连 127.0.0.1:8091。
-    # 若 compose 给 seata 容器加 `SEATA_IP=127.0.0.1`（注册宿主可达 IP），可改回 type=nacos（下方 nacos 配置保留）。
     type: file
     nacos:
       server-addr: 127.0.0.1:8848
@@ -75,7 +73,7 @@ seata:
     type: file
   data-source-proxy-mode: AT
 
-# OpenFeign：Sentinel 降级（item-service 不可用时走 ItemClientFallback，code=90001）
+# OpenFeign：Sentinel 降级（各下游服务不可用时走 *Fallback，返回 code=90001）
 feign:
   sentinel:
     enabled: true
@@ -85,15 +83,29 @@ feign:
         connect-timeout: 3000
         read-timeout: 5000
         logger-level: basic
+      ershou-item-service:
+        connect-timeout: 2000
+        read-timeout: 4000
+      ershou-user-service:
+        connect-timeout: 2000
+        read-timeout: 4000
+      ershou-map-service:
+        connect-timeout: 2000
+        read-timeout: 4000
   httpclient:
     enabled: true
 
+# 交易业务参数（@RefreshScope：Nacos 改动后无需重启，下一个请求即生效）
 ershou:
   order:
-    # Nacos 动态配置演示点（订单数量上限；业务代码读取后改配置即可热更新）
-    max-qty: 99
-    # 自提单状态：2=待面交/待自提
-    default-status: 2
+    max-qty: 99                # 单次下单数量上限（演示动态生效点）
+    default-status: 1          # 个人意向单初始状态：1=待卖家确认（与旧单体一致）
+    lock-buffer-hours: 2       # 卖家接受后锁库到「时间窗结束 + N 小时」
+    lock-default-hours: 24     # 没填时间窗时锁 N 小时
+    max-slot-minutes: 180      # 单次面交时间窗上限（3 小时）
+    max-slot-days: 7           # 最远可预约天数
+    platform-seller-id: 1000   # 平台代卖官方账号 id
+    platform-item-status: 2    # 平台自提单初始状态：2=待自提/待面交
 
 logging:
   level:

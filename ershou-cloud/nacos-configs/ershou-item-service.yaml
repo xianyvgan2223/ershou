@@ -1,6 +1,7 @@
 # =============================================================
 # Nacos dataId: ershou-item-service.yaml   （group=DEFAULT_GROUP）
-# 商品服务（:8082）：MySQL ershou_item / Redis db2 / RabbitMQ / Seata AT
+# 商品服务（:8082，T102 全量拆分）：MySQL ershou_item / Redis db2 / RabbitMQ / Seata AT / Elasticsearch
+# 契约：ershou-cloud/docs/full-split-contract.md
 # =============================================================
 spring:
   datasource:
@@ -17,8 +18,23 @@ spring:
       host: 127.0.0.1
       port: 6380
       password: __REDACTED_DB_PASSWORD__
-      database: 2          # 商品缓存/浏览量，前缀 ershou:item:
+      database: 2          # 商品缓存/浏览量/发布限额，前缀 ershou:item:
       timeout: 3s
+  # Elasticsearch：商品搜索（索引 ershou_item；不可用时降级 MySQL LIKE，见 ershou.search.fallback-to-db）
+  elasticsearch:
+    uris: ${ES_URIS:http://127.0.0.1:9211}
+    connection-timeout: 2s
+    socket-timeout: 5s
+  # 跨服务只读：user-service（卖家信息）/ map-service（点位）/ order-service（挂单作废）
+  # 超时设短一些：这些服务未启动时快速降级，不要拖垮商品接口
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 800
+            readTimeout: 1500
+            loggerLevel: basic
   rabbitmq:
     host: 127.0.0.1
     port: 5672
@@ -75,11 +91,38 @@ seata:
     type: file
   data-source-proxy-mode: AT
 
+# 商品搜索（Elasticsearch）：索引维护在 item-service 内，发布/编辑/下架 afterCommit 同步 + 每 2 分钟增量兜底 + 启动空索引重建
 ershou:
+  search:
+    enabled: true
+    index-name: ershou_item
+    fallback-to-db: true
+    reindex-on-startup: true
+    sync-cron: "0 */2 * * * ?"
+    sync-lookback-minutes: 30
+    bulk-size: 200
+    failure-backoff-ms: 15000
+  # 读缓存（Redis db2）：详情缓存/空值哨兵 TTL
+  cache:
+    enabled: true
+    item-detail-ttl: 10m
+    null-value-ttl: 60s
   item:
+    # 商品有效期：开发期关闭限时（与旧单体 .env 的 ITEM_VALIDITY_ENABLED=false 对齐），
+    # 关闭时发布/重上架不写 expire_at、到期任务跳过；生产改回 true + valid-days=7
+    valid-days: 7
+    validity-enabled: false
+    expire-cron: "0 30 * * * ?"
+    # 浏览量批量回写 cron（Redis 增量 → item.view_count）
+    view-flush-cron: "0 */10 * * * ?"
     # Nacos 动态配置演示点：改这里（如 page-max=20）不重启，@RefreshScope 下一请求生效
     detail-cache-seconds: 60
     page-max: 100
+    # 平台商品（T102 inner 契约 POST /inner/items/platform）：平台官方卖家 id + 平台商品有效期
+    platform-seller-id: 1000
+    platform-valid-days: 30
+    # 搜索索引重建接口（POST /api/v1/search/reindex）允许的用户 id（逗号分隔；空=要求登录即可）
+    reindex-user-ids: ""
 
 logging:
   level:

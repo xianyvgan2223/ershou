@@ -20,7 +20,7 @@
   --accent-600: #f4511e;
 
   // 中性
-  --bg: #f5f7f9;
+  --bg: #ffffff;
   --surface: #ffffff;
   --surface-2: #f8fafc;
   --line: #eef1f5;
@@ -28,6 +28,10 @@
   --text-1: #0f172a;
   --text-2: #475569;
   --text-3: #94a3b8;
+
+  // 顶栏 / 页脚 / 运营台外壳（亮色统一纯白；夜间模式在 theme.scss 覆盖）
+  --header-bg: rgb(255 255 255 / 92%);
+  --footer-bg: #ffffff;
 
   // 圆角
   --r-sm: 8px;

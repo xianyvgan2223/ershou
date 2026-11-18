@@ -1,0 +1,45 @@
+# =============================================================
+# ershou-file-service 本地配置（:8089）
+# =============================================================
+# 按全量拆分契约（ershou-cloud/docs/full-split-contract.md §二）：
+#   本地只保留「端口 / 服务名 / Nacos 地址 / config import / multipart 上限」；
+#   MinIO endpoint/access-key/secret-key/bucket/public-base-url 全部来自
+#   Nacos 配置中心 dataId = ershou-file-service.yaml（演示配置中心能力）。
+# 启动前置：Nacos(8848) 已起 + dataId 已发布；否则服务能启动但上传会返回 90003（MinIO 未配置）。
+# 无数据库、无 Redis、无 Sa-Token：登录态由网关注入 X-User-Id。
+# =============================================================
+server:
+  port: 8089
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: ershou-file-service
+  # 从 Nacos 拉配置（optional: Nacos 不可用时进程仍可启动，便于先验证端口/注册）
+  config:
+    import: optional:nacos:ershou-file-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        # 与 order-service 约定一致：本机多网卡（VPN/虚拟网卡）时固定注册 127.0.0.1，
+        # 让同机网关用 lb://ershou-file-service 直连本机端口，避免选到不可用网卡 IP。
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml
+  servlet:
+    multipart:
+      # 与旧单体 application.yml 保持一致（5MB 单文件 / 30MB 单请求）
+      max-file-size: 5MB
+      max-request-size: 30MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

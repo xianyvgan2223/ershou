@@ -1,0 +1,73 @@
+# =============================================================
+# Nacos dataId: ershou-platform-service.yaml   （group=DEFAULT_GROUP）
+# 平台服务（:8086）：MySQL ershou_platform / Redis db4 / Feign(item/order/user) + Sentinel
+# 说明：平台商品（item 表）归 item-service，本服务只存 platform_* + consign_order；不跨库 SQL。
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_platform
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      # 第 8 轮拆分：平台业务缓存/库存独立 db4（db0 只放 Sa-Token 会话；db1/2/3 分别 user/item/order）
+      database: 4
+      timeout: 3s
+  cloud:
+    nacos:
+      discovery:
+        # 本机演示环境注册 127.0.0.1（VPN/多网卡时 Nacos 自动探测会选到 26.x 虚拟网卡，网关 lb 打不通）
+        ip: 127.0.0.1
+    sentinel:
+      eager: true
+      transport:
+        dashboard: 127.0.0.1:8858
+        port: 8722
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# OpenFeign：item-service（平台商品读写）/ order-service（平台订单）/ user-service（管理员+用户+校区）
+feign:
+  sentinel:
+    enabled: true
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  httpclient:
+    enabled: true
+
+ershou:
+  platform:
+    # 平台官方卖家 sys_user.id（该账号 role_flags=16，不可登录；数据由 user-service 迁移）
+    seller-id: 1000
+    seller-nickname: 校园二手官方严选
+    # 平台商品有效期（天）：发布/重新上架后自动过期时间
+    item-valid-days: 30
+    # 平台单自提窗口（小时）：保留与旧单体一致的配置键（订单超时由 order-service 负责）
+    lock-hours: 168
+    # 运营位：与旧单体 ershou.admin.role-flag:8 一致
+    admin-role-flag: 8
+
+logging:
+  level:
+    com.ershou.cloud.platform: info
+    com.baomidou: warn
+    com.alibaba.nacos: warn

@@ -1,0 +1,28 @@
+# =============================================================
+# 运营后台微服务（:8087）本地配置
+# =============================================================
+# 约定（全量拆分契约第二节）：本地只保留 端口 / 服务名 / Nacos 地址 / spring.config.import；
+# 数据源（ershou_admin）、Redis（db0，仅 Sa-Token 会话）、Sa-Token、MyBatis-Plus、Feign、
+# 业务配置（ershou.admin.*）全部来自 Nacos 配置中心 dataId = ershou-admin-service.yaml。
+# =============================================================
+server:
+  port: 8087
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: ershou-admin-service
+  config:
+    import: optional:nacos:ershou-admin-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        # 本机演示：固定注册 127.0.0.1，避免多网卡注册到 Docker/WSL 虚拟网卡导致 Feign 不通
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}

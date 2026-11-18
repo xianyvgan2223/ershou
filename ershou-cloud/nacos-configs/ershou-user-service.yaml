@@ -19,6 +19,22 @@ spring:
       password: __REDACTED_DB_PASSWORD__
       database: 1          # 业务键（验证码/登录限流）落 db1，前缀 ershou:user:
       timeout: 3s
+  # OpenFeign（T101）：公开主页 onSaleCount 调 item-service。
+  # 超时给短一点：这是展示字段，商品服务没起时不该把公开主页也拖慢/拖挂。
+  # 注意：本版本 Spring Cloud 的 connect-timeout/read-timeout 是 Integer 毫秒（不能写 1s）。
+  cloud:
+    # 注册 IP 固定 127.0.0.1（与 order/item 服务一致）：
+    # 演示机有多个网卡（WSL/Docker/VPN），自动探测会注册到宿主机不可路由的地址，导致网关 lb:// 调不到。
+    nacos:
+      discovery:
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 1000
+            read-timeout: 3000
+            logger-level: basic
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml
@@ -52,6 +68,12 @@ ershou:
     max-per-day: 10
   admin:
     role-flag: 8
+    # 运营白名单（逗号分隔用户 id；与单体 AdminProperties.userIds 同语义，空=不启用）。
+    # 口径：先白名单再 role_flags & role-flag，保证 /users/me 的 isAdmin 与单体一致。
+    user-ids: ${ERSHOU_ADMIN_USER_IDS:}
+  user:
+    # 信用分单次调整范围 ±（与单体 AdminUserService.CREDIT_MAX_DELTA 一致）
+    credit-max-delta: 100
 
 logging:
   level:

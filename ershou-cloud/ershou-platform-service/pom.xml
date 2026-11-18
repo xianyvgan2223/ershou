@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    平台服务（:8086）· 第 8 轮全量拆分（T106）
+
+    从旧单体 module/platform 迁移：平台代卖点 / 优惠券 / 秒杀 / 平台商品运营台 / 缓存管理。
+    - 数据库：MySQL ershou_platform（platform_* + consign_order；不跨库 SQL）
+    - 平台商品（item 表数据）读写走 item-service Feign（/inner/items/platform/**）
+    - 平台订单（meetup_order）走 order-service Feign（/inner/orders/platform）
+    - 用户/管理员判定走 user-service Feign（/inner/users/**）
+    - Redis 保留 platform 库存/券 Lua 原子逻辑（db4，不与会话 db0 混用）
+    - 鉴权：网关注入 X-User-Id，服务内用 common 的 UserContext 读取（不解析 token）
+  -->
+  <parent>
+    <groupId>com.ershou.cloud</groupId>
+    <artifactId>ershou-cloud</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>ershou-platform-service</artifactId>
+  <name>ershou-platform-service</name>
+  <description>平台服务：平台严选/代卖点/优惠券/秒杀/平台运营台（MySQL ershou_platform, Redis db4）</description>
+
+  <properties>
+    <springdoc.version>2.6.0</springdoc.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.ershou.cloud</groupId>
+      <artifactId>ershou-cloud-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <!-- Redisson：分布式锁（缓存重建/预热/GEO 重建），替代手写 SETNX 锁 -->
+    <dependency>
+      <groupId>org.redisson</groupId>
+      <artifactId>redisson</artifactId>
+      <version>3.35.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+    </dependency>
+    <!-- MP 3.5.9 起分页插件拆到独立模块（平台代卖点/券/秒杀运营台分页） -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+
+    <!-- OpenFeign：item-service（平台商品读写）/ order-service（平台订单）/ user-service（管理员+用户信息） -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
+    <!-- Sentinel：Feign 熔断降级（fallback 返回 90001） -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+    </dependency>
+
+    <!-- 接口文档：保持旧单体 controller 上的 springdoc 注解可用（与单体一致 2.6.0） -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

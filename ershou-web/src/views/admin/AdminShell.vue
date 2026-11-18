@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, Clock, DataLine, Goods, List, Operation, User } from '@element-plus/icons-vue'
+import { Bell, Clock, DataLine, Goods, List, Moon, Operation, Sunny, User } from '@element-plus/icons-vue'
 import { fetchReviewStats } from '@/api/admin'
 import { useAdminStore } from '@/stores/admin'
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 import { closeAllTips, showTip } from '@/utils/feedback'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const adminStore = useAdminStore()
+const { isDark, toggleTheme } = useTheme()
 
 /**
  * 上架审核的待办数单独一份：它不在概览接口里（口径是"还挂在平台上的、还没被人工看过的"），
@@ -85,6 +87,15 @@ async function reloadTodo(): Promise<void> {
         </p>
       </div>
       <div class="admin__head-right">
+        <!-- 夜间模式：管理台是长时间盯屏场景，暗色更护眼 -->
+        <el-tooltip :content="isDark ? '切换为日间模式' : '切换为夜间模式'" placement="bottom">
+          <el-button
+            circle
+            :icon="isDark ? Sunny : Moon"
+            :aria-label="isDark ? '切换为日间模式' : '切换为夜间模式'"
+            @click="toggleTheme"
+          />
+        </el-tooltip>
         <!-- 待办徽标：只在真有待办时出现，不再常挂一个"暂无待办"的绿标签占位置 -->
         <el-tag v-if="todoCount > 0" type="warning" effect="dark" round>{{ todoCount }} 项待办</el-tag>
         <!-- 平台代卖能力已迁到独立运营台（第 3 轮）：这里只留一个醒目入口，不再在后台内嵌子页 -->

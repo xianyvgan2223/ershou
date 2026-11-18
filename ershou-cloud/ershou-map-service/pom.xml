@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- 地图/面交点服务（:8085，T105）：从旧单体 module/map 全量拆出。
+       职责：地图底图+点位聚合、附近点位（Redis GEO）、选点/逆地理反查、点位管理 inner API。
+       MySQL ershou_map / Redis db5（前缀 ershou:map:）。
+       注意：父 pom（ershou-cloud/pom.xml）由 Lead 维护，本任务按契约**不修改**父 pom 的 <modules>；
+             单模块构建用 `mvn -f ershou-cloud/ershou-map-service/pom.xml package`（parent 走相对路径 ../pom.xml）。 -->
+  <parent>
+    <groupId>com.ershou.cloud</groupId>
+    <artifactId>ershou-cloud</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>ershou-map-service</artifactId>
+  <name>ershou-map-service</name>
+  <description>地图服务：地图点位/附近/选点/反查询 + 点位管理内部接口（MySQL ershou_map, Redis db5）</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.ershou.cloud</groupId>
+      <artifactId>ershou-cloud-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <!-- 点位缓存 + Redis GEO（附近点位） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <!-- Redisson：分布式锁（缓存重建/预热/GEO 重建），替代手写 SETNX 锁 -->
+    <dependency>
+      <groupId>org.redisson</groupId>
+      <artifactId>redisson</artifactId>
+      <version>3.35.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+    </dependency>
+    <!-- MP 3.5.9 起分页插件拆到独立模块，selectPage 必须带它 -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+
+    <!-- 跨服务只读：item-service（点位商品数/列表）、user-service（校区底图配置） -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
+    <!-- Feign fallback（feign.sentinel.enabled=true），下游不可用时返回统一错误码而不是 500 -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

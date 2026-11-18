@@ -27,6 +27,11 @@
     <module>ershou-user-service</module>
     <module>ershou-item-service</module>
     <module>ershou-order-service</module>
+    <module>ershou-chat-service</module>
+    <module>ershou-map-service</module>
+    <module>ershou-platform-service</module>
+    <module>ershou-admin-service</module>
+    <module>ershou-file-service</module>
   </modules>
 
   <properties>

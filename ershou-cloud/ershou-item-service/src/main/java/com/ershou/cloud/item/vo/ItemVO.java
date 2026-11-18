@@ -1,25 +1,13 @@
 package com.ershou.cloud.item.vo;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * 商品 VO —— 字段与单体 {@code module/item/vo/ItemVO} 对齐，Web 首页/详情可直接使用（设计 4.3）。
- *
- * <p>云切片说明：
- * <ul>
- *   <li>{@code seller} 只填 id（跨库拿不到昵称/头像，属已知限制；Web 卡片有「同学」兜底）；</li>
- *   <li>{@code preferPointName/Guide}、{@code highlight*} 暂无数据源，保持 null（Web 为可选字段）；</li>
- *   <li>时间用 {@code yyyy-MM-dd HH:mm:ss} 序列化，与单体返回格式一致（避免前端/移动端二次适配）。</li>
- * </ul>
- */
 @Data
 public class ItemVO {
-
     private Long id;
     private String title;
     private String description;
@@ -36,9 +24,17 @@ public class ItemVO {
     private Long preferPointId;
     private String preferPointName;
     private String preferPointGuide;
-    /** 1=个人卖家 2=平台自营（官方代卖），Web 首页据此渲染金色角标 */
+    /** 卖家类型：1=个人卖家，2=平台自营（官方代卖）。前端据此渲染「官方代卖」角标 */
     private Integer sellerType;
+    /** 平台代卖/自提点 id（仅平台商品有值，个人商品为 null） */
     private Long platformPointId;
+    /**
+     * 平台代卖/自提点名称（仅平台商品有值）。
+     *
+     * <p>TODO(platform): 点位数据属 platform 模块（platform_consign_point 表），item 模块不反向依赖它，
+     * 所以这里暂时恒为 null；前端用 {@code platformPointId} 调 platform 接口解析名称。
+     * 若后续 Lead 决定允许 item → platform 的只读依赖，再在 ItemService 组装时按 id 批量取名。
+     */
     private String platformPointName;
     private Integer status;
     private String statusText;
@@ -46,17 +42,14 @@ public class ItemVO {
     private Integer isUnique;
     private Integer viewCount;
     private Integer favCount;
+    /** 当前登录用户是否已收藏（未登录恒为 false；列表 / 详情接口都会返回） */
     private Boolean favorited = false;
-    /** 已售件数（第 5 轮 MQ 演示字段，Web 暂不展示） */
-    private Integer saleCount;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime publishedAt;
-
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    /** 有效期截止时间：前端据此显示「还剩 X 天自动下架」 */
     private LocalDateTime expireAt;
-
     private SellerVO seller;
+    /** 搜索命中时的标题高亮片段（只含 <em> 标签，ES 已做 HTML 转义） */
     private String highlightTitle;
+    /** 搜索命中时的描述高亮片段 */
     private String highlightDescription;
 }

@@ -1,0 +1,306 @@
+// =============================================================
+// 纯白底 + 夜间模式
+// -------------------------------------------------------------
+// 亮色：页面统一纯白（--bg: #fff），只用极浅灰做卡片/输入框的分层；
+// 暗色：<html class="dark"> + Element Plus dark 变量 + 项目变量覆盖。
+// 主题状态存 localStorage（ershou:theme），首屏在 index.html 里提前恢复。
+// =============================================================
+
+html.dark {
+  color-scheme: dark;
+
+  // ---------- 项目设计令牌 ----------
+  --bg: #0b1120;
+  --surface: #121a2b;
+  --surface-2: #182338;
+  --line: #1f2a3d;
+  --line-strong: #2a3852;
+  --text-1: #e6edf7;
+  --text-2: #a9b7cc;
+  --text-3: #6f8099;
+  --header-bg: rgb(11 17 32 / 88%);
+  --footer-bg: #0b1120;
+
+  // 品牌色在深色底上稍提亮，保证对比度
+  --brand-50: #0d2b22;
+  --brand-100: #103a2c;
+  --brand-200: #1a5c45;
+  --brand-300: #2f8f6b;
+  --brand-400: #34d399;
+  --brand-500: #12b981;
+  --brand-600: #10a878;
+  --brand-700: #6ee7b7;
+  --accent-500: #ff8a5c;
+  --accent-600: #ff6b35;
+
+  // 阴影在深色底上减轻
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 35%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 35%), 0 4px 12px -6px rgb(0 0 0 / 55%);
+  --shadow-md: 0 2px 4px rgb(0 0 0 / 35%), 0 12px 28px -12px rgb(0 0 0 / 65%);
+  --shadow-lg: 0 4px 8px rgb(0 0 0 / 35%), 0 24px 48px -16px rgb(0 0 0 / 70%);
+
+  // ---------- Element Plus 变量（覆盖 dark/css-vars.css） ----------
+  --el-color-primary: var(--brand-500);
+  --el-color-primary-light-3: #2f8f6b;
+  --el-color-primary-light-5: #1a5c45;
+  --el-color-primary-light-7: #103a2c;
+  --el-color-primary-light-8: #0d2b22;
+  --el-color-primary-light-9: #0a211a;
+  --el-color-primary-dark-2: var(--brand-600);
+  --el-color-success: var(--brand-500);
+  --el-color-danger: #f56565;
+  --el-color-warning: #f6ad55;
+  --el-color-info: #94a3b8;
+
+  --el-bg-color: #121a2b;
+  --el-bg-color-page: #0b1120;
+  --el-bg-color-overlay: #16203a;
+  --el-fill-color-blank: #121a2b;
+  --el-fill-color: #182338;
+  --el-fill-color-light: #1f2a3d;
+  --el-fill-color-lighter: #243149;
+  --el-fill-color-extra-light: #182338;
+  --el-fill-color-dark: #0f1728;
+  --el-fill-color-darker: #0b1120;
+  --el-text-color-primary: #e6edf7;
+  --el-text-color-regular: #a9b7cc;
+  --el-text-color-secondary: #6f8099;
+  --el-text-color-placeholder: #5a6b83;
+  --el-text-color-disabled: #46566e;
+  --el-border-color: #1f2a3d;
+  --el-border-color-light: #1f2a3d;
+  --el-border-color-lighter: #1a2438;
+  --el-border-color-extra-light: #182338;
+  --el-border-color-dark: #2a3852;
+  --el-border-color-darker: #34445f;
+  --el-box-shadow-light: 0 1px 2px rgb(0 0 0 / 45%);
+  --el-mask-color: rgb(2 6 16 / 80%);
+  --el-mask-color-extra-light: rgb(2 6 16 / 45%);
+}
+
+// ---------- 页面与布局 ----------
+html.dark body {
+  background: var(--bg);
+  color: var(--text-1);
+}
+
+html.dark {
+  .header {
+    border-bottom-color: var(--line);
+    background: var(--header-bg);
+  }
+
+  .footer {
+    border-top-color: var(--line);
+    background: var(--footer-bg);
+  }
+
+  .hero {
+    border-bottom-color: var(--line);
+    background: var(--surface);
+  }
+
+  .hero__panel {
+    border-color: var(--line);
+    background: linear-gradient(180deg, #0f2e24, var(--surface) 62%);
+  }
+
+  .hero__search .el-input__wrapper {
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+  }
+
+  .hero .official-entry {
+    border-color: #3b3427;
+    background: linear-gradient(100deg, #201a10, #141b2c 62%);
+  }
+
+  .hero .official-entry:hover {
+    border-color: #6b5a2c;
+  }
+
+  .cat {
+    border-color: var(--line-strong);
+    background: var(--surface);
+  }
+
+  .tabs__item.is-active {
+    background: var(--surface);
+  }
+
+  .skeleton-card {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .empty-state {
+    border-color: var(--line-strong);
+    background: var(--surface);
+  }
+
+  .login__panel {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .form-card__dev {
+    color: var(--brand-700);
+  }
+
+  .el-card {
+    --el-card-bg-color: var(--surface);
+  }
+
+  .el-table {
+    --el-table-bg-color: var(--surface);
+    --el-table-tr-bg-color: var(--surface);
+    --el-table-header-bg-color: var(--surface-2);
+    --el-table-row-hover-bg-color: var(--surface-2);
+    --el-table-border-color: var(--line);
+  }
+
+  .admin .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+    background: var(--surface-2);
+  }
+
+  .el-input__wrapper,
+  .el-textarea__inner,
+  .el-select__wrapper {
+    background-color: var(--surface);
+  }
+
+  .el-menu {
+    --el-menu-bg-color: var(--surface);
+    --el-menu-text-color: var(--text-2);
+    --el-menu-active-color: var(--text-1);
+    --el-menu-hover-bg-color: var(--surface-2);
+    border-right-color: var(--line);
+  }
+
+  .el-pagination {
+    --el-pagination-bg-color: var(--surface);
+    --el-pagination-button-bg-color: var(--surface-2);
+    --el-pagination-hover-color: var(--brand-300);
+  }
+
+  .el-dropdown-menu {
+    background: var(--el-bg-color-overlay);
+  }
+
+  .el-message-box,
+  .el-dialog,
+  .el-drawer {
+    background: var(--el-bg-color-overlay);
+  }
+
+  .el-tag {
+    --el-tag-border-color: var(--line-strong);
+  }
+
+  .skeleton {
+    background: #1b263b;
+
+    &::after {
+      background: linear-gradient(90deg, transparent, rgb(255 255 255 / 8%), transparent);
+    }
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    background-clip: content-box;
+
+    &:hover {
+      background: #475569;
+      background-clip: content-box;
+    }
+  }
+
+  ::selection {
+    background: #1a5c45;
+    color: #d1fae5;
+  }
+
+  // ---------- 学生端 ----------
+  .card {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .chat {
+    border-color: var(--line);
+    background: var(--surface);
+
+    &__quick-item,
+    &__recall {
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text-2);
+    }
+
+    &__blocked {
+      background: #3b1d24;
+      color: #fca5a5;
+    }
+
+    &__offline {
+      border-bottom-color: #5a4423;
+      background: #2e2414;
+      color: #fbbf24;
+    }
+  }
+
+  .msg__bubble {
+    background: var(--surface-2);
+    color: var(--text-1);
+
+    .msg--mine & {
+      background: var(--brand-600);
+      color: #f0fdf4;
+    }
+
+    &.is-image {
+      background: var(--surface-2);
+    }
+  }
+
+  .map-box {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .map-side-item:hover {
+    background: var(--surface-2);
+  }
+
+  // ---------- 运营台 ----------
+  .pc {
+    background: var(--bg);
+  }
+
+  .pc__top {
+    border-bottom-color: var(--line);
+    background: var(--header-bg);
+  }
+
+  .pc__admin {
+    background: var(--surface);
+  }
+
+  // 运营台子页面里的统计/明细卡（各页 scoped 样式里写死了白底）
+  .cp-hero,
+  .cp-kpi,
+  .cp-card,
+  .flash-scene,
+  .items__toolbar,
+  .points__toolbar,
+  .coupons__toolbar,
+  .orders__toolbar,
+  .cache__toolbar {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .el-table__inner-wrapper::before {
+    background-color: var(--line);
+  }
+}

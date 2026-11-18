@@ -677,7 +677,7 @@ watch(focusOnly, (value) => {
   height: 100%;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 

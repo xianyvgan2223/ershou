@@ -34,6 +34,12 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis</artifactId>
     </dependency>
+    <!-- Redisson：分布式锁（缓存重建/预热/GEO 重建），替代手写 SETNX 锁 -->
+    <dependency>
+      <groupId>org.redisson</groupId>
+      <artifactId>redisson</artifactId>
+      <version>3.35.0</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-amqp</artifactId>
@@ -41,6 +47,24 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <!-- Elasticsearch：商品搜索（客户端版本由 Spring Boot BOM 统一管理，与单体同 8.13.x）；
+         使用 spring-boot-starter-data-elasticsearch 提供的 RestClient/ElasticsearchClient -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+    </dependency>
+    <!-- OpenFeign：调用 user-service（卖家信息）/ map-service（点位）/ order-service（挂单作废）内部接口；
+         跨域只读/通知一律走 Feign，禁止跨库 SQL（全量拆分契约 §二） -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <!-- OpenFeign 走注册中心（lb://）必须有 loadbalancer，否则启动报
+         "No Feign Client for loadBalancing defined"（platform-dev 实测复现） -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
     </dependency>
 
     <dependency>

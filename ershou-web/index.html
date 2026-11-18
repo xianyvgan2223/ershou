@@ -9,6 +9,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="校园二手交易平台学生端：校内闲置发布、面交点自提、面交单核销" />
     <title>校园二手 · 校内交易</title>
+    <script>
+      // 在 CSS 加载前恢复夜间模式，避免首屏闪白
+      (function () {
+        try {
+          if (localStorage.getItem('ershou:theme') === 'dark') {
+            document.documentElement.classList.add('dark')
+            document.documentElement.dataset.theme = 'dark'
+            document.documentElement.style.colorScheme = 'dark'
+          }
+        } catch (e) {
+          // localStorage 不可用时按白底处理
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

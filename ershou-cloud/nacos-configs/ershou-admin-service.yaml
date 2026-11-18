@@ -1,0 +1,79 @@
+# =============================================================
+# Nacos dataId: ershou-admin-service.yaml   （group=DEFAULT_GROUP）
+# 运营后台服务（:8087）：MySQL ershou_admin / Redis db0（仅 Sa-Token 会话）/ OpenFeign(+Sentinel)
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_admin?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_admin
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    # 仅 Sa-Token 会话库（与单体/user-service/网关共享 db0）；本服务不写业务 Redis key
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      database: 0
+      timeout: 3s
+  cloud:
+    sentinel:
+      eager: true
+      transport:
+        dashboard: 127.0.0.1:8858
+        port: 8727
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# Sa-Token：与单体/网关完全一致（token-name/prefix 一致才能读同一个共享会话；WS 握手用）
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 315360000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+# OpenFeign：调各服务 /inner/**；不可用时走 fallback（统一 90001）
+feign:
+  sentinel:
+    enabled: true
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  httpclient:
+    enabled: true
+
+ershou:
+  admin:
+    # role_flags 命中该位即视为运营（仅用于本服务本地校验兜底；权威判定仍是 user-service /inner/users/{id}.isAdmin）
+    role-flag: 8
+    # 应急/演示兜底管理员 id（默认空 = 关闭）。Feign 判定不可用时才会用到；生产不要配置。
+    bootstrap-user-ids: ""
+  review:
+    # 上架审核批量处置上限（前端一次最多 50 条）
+    max-batch-size: 50
+    # 审核实时 WS 开关（T107 首版只做握手/ping-pong，广播事件由 item-service 侧产生，标记遗留）
+    realtime-enabled: true
+
+logging:
+  level:
+    com.ershou.cloud.admin: info
+    com.baomidou: warn
+    com.alibaba.nacos: warn

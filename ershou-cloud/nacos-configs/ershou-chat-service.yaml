@@ -1,0 +1,86 @@
+# =============================================================
+# Nacos dataId: ershou-chat-service.yaml   （group=DEFAULT_GROUP）
+# 私聊服务（:8084）：MySQL ershou_chat / Redis db4（业务）+ db0（Sa-Token 会话共享）/ Feign+Sentinel
+# =============================================================
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/ershou_chat?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ershou_chat
+    password: __REDACTED_DB_PASSWORD__
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      password: __REDACTED_DB_PASSWORD__
+      # 业务 key（未读快照/在线心跳/跨实例广播/新号限额）落 db4；Sa-Token 会话固定 db0（SaTokenRedisConfig 单独连接）
+      database: 4
+      timeout: 3s
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# Sa-Token：与网关 8088 / 其它服务完全一致；WS 握手用其校验 ?token=
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 315360000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+ershou:
+  cloud:
+    # SaTokenRedisConfig 用：会话库固定 db0（host/port/password 复用 spring.data.redis.*）
+    session-redis-database: 0
+  crypto:
+    # 必须与旧单体一致（旧库 chat_message 的文本用该默认 key 加密），否则迁移过来的历史消息解不开
+    chat-key: ${CHAT_CONTENT_KEY:__REDACTED_CHAT_KEY__}
+  chat:
+    enabled: true
+    max-text-length: 500
+    history-size: 20
+    max-history-size: 50
+    # 新号每日限额：与单体一致默认关闭（打开后需 user-service /inner/users/{id} 返回 createdAt/chatLimit）
+    daily-limit-enabled: false
+    new-user-days: 7
+    online-ttl: 90s
+    preview-length: 60
+    recall-window: 2m
+    quick-replies:
+      - 还在的
+      - 可小刀
+      - 支持当面验货
+      - XX 点见面可以吗
+      - 已出，抱歉
+
+# OpenFeign：Sentinel 降级（user/item 不可用时走 *ClientFallback，返回 code=80001，chat 主链路降级不报错）
+feign:
+  sentinel:
+    enabled: true
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  httpclient:
+    enabled: true
+
+logging:
+  level:
+    com.ershou.cloud.chat: info
+    com.baomidou: warn
+    com.alibaba.nacos: warn

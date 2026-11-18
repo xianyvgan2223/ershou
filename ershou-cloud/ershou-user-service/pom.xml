@@ -41,6 +41,12 @@
       <groupId>com.baomidou</groupId>
       <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
     </dependency>
+    <!-- MP 3.5.9 起分页插件（PaginationInnerInterceptor）拆到独立模块：
+         /inner/users 管理列表用 selectPage，必须带它，否则 total=0 且不拼 LIMIT -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+    </dependency>
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
@@ -64,6 +70,18 @@
     <dependency>
       <groupId>com.alibaba.cloud</groupId>
       <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+
+    <!-- OpenFeign + 负载均衡：公开主页 onSaleCount 需要 item-service 的商品数据。
+         契约没有 count-by-seller 内部接口，当前走 item-service 公开列表 total 并做防御式校验；
+         服务不可用时降级为 0（不阻塞主页）。 -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
     </dependency>
 
     <dependency>

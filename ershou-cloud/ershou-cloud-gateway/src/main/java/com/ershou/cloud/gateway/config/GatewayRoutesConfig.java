@@ -1,61 +1,60 @@
 package com.ershou.cloud.gateway.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 
 /**
- * 网关路由（第 5 轮设计 4.1，绞杀者模式）。
+ * 网关路由（全量微服务拆分版）。
  *
- * <p>原则：已迁移的按服务前缀走 {@code lb://}；未迁移/写路径反代旧单体 {@code 8080}，功能不中断。
- * 路由按声明顺序匹配（Spring Cloud Gateway 给每个 route 递增 order），所以特例必须放在通配之前。
+ * <p>旧单体 {@code 8080} 不再被网关反代：所有 {@code /api/v1/**} 与 {@code /ws/**} 均路由到对应微服务。
+ * 路由按声明顺序匹配，因此前缀更具体的路由必须放在通配之前。
  *
- * <p>与设计/负责人确认后的两处调整（已报备）：
- * <ol>
- *   <li>{@code GET /api/v1/items/mine} 反代单体：我的发布仍是单体写路径，item-service 没有该接口，
- *       不能被 {@code GET /api/v1/items/**} 劫持（否则 "mine" 被当 Long 解析直接 400）；</li>
- *   <li>{@code /api/v1/categories} 路由到 item-service：分类表在 {@code ershou_item} 库，
- *       user-service 的库没有 item_category（item-member 已在 item-service 实现同结构接口）。</li>
- * </ol>
+ * <p>服务划分：
+ * <ul>
+ *   <li>user-service：认证、学校、用户（含公开主页 / 个人资料 / 黑名单）</li>
+ *   <li>item-service：商品读写、分类、搜索（含“我的发布”）</li>
+ *   <li>order-service：购物车、收藏、面交单（含状态流转/待办）</li>
+ *   <li>chat-service：私聊 HTTP 接口 + WebSocket</li>
+ *   <li>map-service：校内地图、面交点、附近点位</li>
+ *   <li>platform-service：平台代卖、优惠券、秒杀、平台运营台</li>
+ *   <li>admin-service：管理后台（审核/用户/商品/面交单/日志）</li>
+ *   <li>file-service：MinIO 上传</li>
+ * </ul>
  */
 @Configuration
 public class GatewayRoutesConfig {
 
-    /** 旧单体地址（未迁移路径反代；Nacos 可覆盖） */
-    @Value("${ershou.gateway.legacy-uri:http://127.0.0.1:8080}")
-    private String legacyUri;
-
-    /** WebSocket（聊天暂留单体） */
-    @Value("${ershou.gateway.ws-uri:ws://127.0.0.1:8080}")
-    private String wsUri;
-
     @Bean
     public RouteLocator gatewayRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
-                // ---- 用户服务：认证 / 学校 / 当前用户 ----
+                // ---- 用户服务：认证 / 学校 / 用户（全部） ----
                 .route("ershou-user-auth", r -> r.path("/api/v1/auth/**").uri("lb://ershou-user-service"))
                 .route("ershou-user-schools", r -> r.path("/api/v1/schools/**").uri("lb://ershou-user-service"))
-                .route("ershou-user-me", r -> r.path("/api/v1/users/me").uri("lb://ershou-user-service"))
-                // 其余 /users/**（公开主页、历史接口）仍走单体
-                .route("ershou-user-legacy", r -> r.path("/api/v1/users/**").uri(legacyUri))
-                // ---- 商品服务：分类 + 商品读；写路径/我的发布反代单体 ----
+                .route("ershou-user", r -> r.path("/api/v1/users/**").uri("lb://ershou-user-service"))
+                // ---- 商品服务：分类 / 商品读写 / 搜索 ----
                 .route("ershou-item-categories", r -> r.path("/api/v1/categories", "/api/v1/categories/**")
                         .uri("lb://ershou-item-service"))
-                .route("ershou-item-mine", r -> r.method(HttpMethod.GET).and().path("/api/v1/items/mine")
-                        .uri(legacyUri))
-                .route("ershou-item-get", r -> r.method(HttpMethod.GET).and().path("/api/v1/items/**")
-                        .uri("lb://ershou-item-service"))
-                .route("ershou-item-write", r -> r.path("/api/v1/items/**").uri(legacyUri))
-                // ---- 订单服务：面交单创建 + 我的列表（已迁移） ----
-                .route("ershou-order-meetup", r -> r.path("/api/v1/meetup-orders/**")
-                        .uri("lb://ershou-order-service"))
-                // ---- WebSocket ----
-                .route("ershou-legacy-ws", r -> r.path("/ws/**").uri(wsUri))
-                // ---- 其余 /api/v1/**（admin/platform/map/files/search/cart/favorites…）反代单体 ----
-                .route("ershou-legacy-api", r -> r.path("/api/v1/**").uri(legacyUri))
+                .route("ershou-item", r -> r.path("/api/v1/items/**").uri("lb://ershou-item-service"))
+                .route("ershou-item-search", r -> r.path("/api/v1/search/**").uri("lb://ershou-item-service"))
+                // ---- 订单服务：购物车 / 收藏 / 面交单 ----
+                .route("ershou-order-cart", r -> r.path("/api/v1/cart/**").uri("lb://ershou-order-service"))
+                .route("ershou-order-favorites", r -> r.path("/api/v1/favorites/**").uri("lb://ershou-order-service"))
+                .route("ershou-order-meetup", r -> r.path("/api/v1/meetup-orders/**").uri("lb://ershou-order-service"))
+                // ---- 聊天服务：HTTP + WebSocket（WS 鉴权由 chat-service 自己处理 ?token=） ----
+                .route("ershou-chat", r -> r.path("/api/v1/chat/**").uri("lb://ershou-chat-service"))
+                .route("ershou-admin-ws", r -> r.path("/ws/admin/**").uri("lb://ershou-admin-service"))
+                .route("ershou-chat-ws", r -> r.path("/ws", "/ws/**").uri("lb://ershou-chat-service"))
+                // ---- 地图服务 ----
+                .route("ershou-map", r -> r.path("/api/v1/map/**", "/api/v1/trade-points/**")
+                        .uri("lb://ershou-map-service"))
+                // ---- 平台服务 ----
+                .route("ershou-platform", r -> r.path("/api/v1/platform/**").uri("lb://ershou-platform-service"))
+                // ---- 管理后台服务 ----
+                .route("ershou-admin", r -> r.path("/api/v1/admin/**").uri("lb://ershou-admin-service"))
+                // ---- 文件服务 ----
+                .route("ershou-file", r -> r.path("/api/v1/files/**").uri("lb://ershou-file-service"))
                 .build();
     }
 }

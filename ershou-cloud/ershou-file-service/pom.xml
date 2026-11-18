@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- 文件服务（:8089）：从旧单体 module/file 拆出的 MinIO 上传能力。无数据库/无 Redis/无 Sa-Token。
+       父工程沿用 ershou-cloud（不修改父 pom，按契约用 ../pom.xml + 本地仓库已安装的 common 构建）。 -->
+  <parent>
+    <groupId>com.ershou.cloud</groupId>
+    <artifactId>ershou-cloud</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>ershou-file-service</artifactId>
+  <name>ershou-file-service</name>
+  <description>文件服务：MinIO 图片上传（:8089，路径 /api/v1/files/**，无数据库）</description>
+
+  <properties>
+    <!-- 与旧单体保持一致：MinIO 8.5.12 + Thumbnailator 0.4.20（父 pom 未统一管理，故本模块显式声明） -->
+    <minio.version>8.5.12</minio.version>
+    <thumbnailator.version>0.4.20</thumbnailator.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.ershou.cloud</groupId>
+      <artifactId>ershou-cloud-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- MinIO 对象存储 + 图片压缩（与单体 common/storage/MinioFileStorageService 行为一致） -->
+    <dependency>
+      <groupId>io.minio</groupId>
+      <artifactId>minio</artifactId>
+      <version>${minio.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>net.coobird</groupId>
+      <artifactId>thumbnailator</artifactId>
+      <version>${thumbnailator.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

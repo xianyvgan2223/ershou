@@ -1,0 +1,27 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: ershou-map-service
+  # 全量拆分契约（ershou-cloud/docs/full-split-contract.md）：
+  # 本地只留端口/服务名/Nacos 地址/import；数据源(ershou_map)、Redis(db5)、Feign/Sentinel、
+  # 业务参数、AMap key 全部由 Nacos 配置中心下发（dataId=ershou-map-service.yaml）。
+  config:
+    import: optional:nacos:ershou-map-service.yaml?group=DEFAULT_GROUP&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        # 本机演示：固定注册 127.0.0.1，避免多网卡时注册到 Docker/WSL 虚拟网卡导致 Feign 调不通
+        ip: ${NACOS_REGISTER_IP:127.0.0.1}
+      config:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        file-extension: yaml
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
