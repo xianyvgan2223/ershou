@@ -50,7 +50,7 @@ param(
   [int]$LegacyWaitSec = 240,
   [int]$MqWaitSec = 15,
   [string]$MySQLPath = 'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe',
-  [string]$CloudDbPassword = '__REDACTED_DB_PASSWORD__',
+  [string]$CloudDbPassword = '',
   [string]$OutJson = '.build\cloud\demo-result.json',
   [string]$LogDir = '.build\cloud\logs',
   [switch]$NoStartLegacy,
@@ -91,6 +91,11 @@ if (Test-Path $envFile) {
     Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim()
   }
   $script:envLoaded = $true
+}
+if (-not $CloudDbPassword) { $CloudDbPassword = $env:MYSQL_PASSWORD }
+if (-not $CloudDbPassword) {
+  Write-Host '缺少数据库密码：请先在仓库根 .env 中配置 MYSQL_PASSWORD（或传 -CloudDbPassword）' -ForegroundColor Red
+  exit 1
 }
 
 $script:apiGateway = $Gateway.TrimEnd('/') + '/api/v1'

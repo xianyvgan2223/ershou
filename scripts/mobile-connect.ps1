@@ -31,6 +31,16 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$root = Split-Path -Parent $PSScriptRoot
+$envFile = Join-Path $root '.env'
+if (Test-Path $envFile) {
+  [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) | Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Za-z_]+=' } | ForEach-Object {
+    $line = $_.TrimStart([char]0xFEFF).Trim()
+    $k, $v = (($line -split '#', 2)[0]) -split '=', 2
+    if ($k -and $v) { Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim() }
+  }
+}
+$env:MYSQL_PWD = $env:MYSQL_PASSWORD
 $adb = 'D:\tools\Android\Sdk\platform-tools\adb.exe'
 
 if (-not (Test-Path $adb)) {
@@ -81,7 +91,6 @@ if ($gwLocal) {
 }
 
 # 取一张真实图片验证 MinIO 隧道（403 是 MinIO 根路径的正常响应，要测具体对象）
-$env:MYSQL_PWD = if ($env:MYSQL_PASSWORD) { $env:MYSQL_PASSWORD } else { '__REDACTED_DB_PASSWORD__' }
 $mysql = 'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe'
 $img = ''
 if (Test-Path $mysql) {

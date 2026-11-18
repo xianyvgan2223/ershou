@@ -9,7 +9,7 @@
 --   * 账号已由 Lead 预建（ershou_map@'%'），这里保留 IF NOT EXISTS + GRANT 兜底。
 --
 -- 执行：
---   mysql --host=127.0.0.1 --port=3306 --user=root --password=__REDACTED_DB_PASSWORD__ < ershou-cloud/sql/split-map.sql
+--   powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\split-map.sql
 -- =============================================================
 
 -- 1) 建库（独立库，不跨库 SQL）
@@ -24,7 +24,7 @@ TRUNCATE TABLE `ershou_map`.`trade_point`;
 INSERT INTO `ershou_map`.`trade_point` SELECT * FROM `ershou`.`trade_point`;
 
 -- 4) 服务账号兜底（Lead 已建则跳过；密码与其它服务统一）
-CREATE USER IF NOT EXISTS 'ershou_map'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_map'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_map`.* TO 'ershou_map'@'%';
 FLUSH PRIVILEGES;
 

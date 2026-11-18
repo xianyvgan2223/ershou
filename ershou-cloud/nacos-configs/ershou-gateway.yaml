@@ -9,7 +9,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       database: 0          # 唯一允许跨服务共用的库：Sa-Token 会话（与单体 8080 互通）
       timeout: 3s
   cloud:

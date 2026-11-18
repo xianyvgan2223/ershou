@@ -7,7 +7,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/ershou_chat?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ershou_chat
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
@@ -16,7 +16,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       # 业务 key（未读快照/在线心跳/跨实例广播/新号限额）落 db4；Sa-Token 会话固定 db0（SaTokenRedisConfig 单独连接）
       database: 4
       timeout: 3s
@@ -47,7 +47,7 @@ ershou:
     session-redis-database: 0
   crypto:
     # 必须与旧单体一致（旧库 chat_message 的文本用该默认 key 加密），否则迁移过来的历史消息解不开
-    chat-key: ${CHAT_CONTENT_KEY:__REDACTED_CHAT_KEY__}
+    chat-key: ${CHAT_CONTENT_KEY}
   chat:
     enabled: true
     max-text-length: 500

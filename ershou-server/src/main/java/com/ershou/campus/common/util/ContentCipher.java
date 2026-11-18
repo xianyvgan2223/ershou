@@ -33,7 +33,7 @@ public class ContentCipher {
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
-    public ContentCipher(@Value("${ershou.crypto.chat-key:__REDACTED_CHAT_KEY__}") String rawKey) {
+    public ContentCipher(@Value("${ershou.crypto.chat-key}") String rawKey) {
         try {
             // 取 SHA-256 前 16 字节当密钥：配置里写多长都不会因为密钥长度不合法启动失败
             byte[] digest = MessageDigest.getInstance("SHA-256")

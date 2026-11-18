@@ -7,9 +7,12 @@
 // 本脚本按真实数据来：找出"相距 <100 米且各自有在售商品"的一组点位，
 // 对比单点查询与多点查询的条数，证明修复真的能看到全部商品。
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const API = 'http://127.0.0.1:8080/api/v1'
-const MYSQL_PWD = '__REDACTED_DB_PASSWORD__'
+const MYSQL_PWD = process.env.MYSQL_PASSWORD
 const MYSQL = 'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe'
 
 let pass = 0

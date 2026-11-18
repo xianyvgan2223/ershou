@@ -133,7 +133,7 @@
 
 **P1-6 手机号 AES 密钥是公开默认值，且全仓未配置 `PHONE_AES_KEY`**
 
-- **现象**：密钥默认 `__REDACTED_PHONE_KEY__`（16 位），`.env`/`.env.example` 都没有 `PHONE_AES_KEY`，`PhoneCrypto` 构造器也兜底同一常量；加密算法为 AES/ECB（无 IV，确定性）。
+- **现象**：密钥默认值已移除，改由 `.env` 的 `PHONE_AES_KEY` 注入（缺失时启动失败）；加密算法为 AES/ECB（无 IV，确定性）。
 - **证据**：`application.yml:80`、`PhoneCrypto.java:20-25,29,53`、全仓 grep `PHONE_AES_KEY|phone-key` 仅命中上述两处。
 - **影响**：任何拿到数据库备份/只读权限的人都能用仓库里的默认密钥批量解密全部手机号（个人敏感信息），"手机号加密存储"的防护等于失效；AES/ECB 还会让相同明文产生相同密文（同号重复已由 `phone_hash` 唯一索引挡住，但同前缀等模式仍可分析）。
 - **建议修法**：`.env` 与 `.env.example` 显式声明 `PHONE_AES_KEY=<随机 16 位>`，并在启动时断言"密钥 ≠ 默认值"，否则启动失败；中期改为 AES-GCM（随机 IV 随密文存储）+ 密钥轮换方案。**是否升级为 P0 请 Leader 裁定**（我按"需要 DB 权限才能利用"评为 P1）。

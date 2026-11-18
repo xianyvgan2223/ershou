@@ -29,12 +29,12 @@ ALTER TABLE `chat_session` AUTO_INCREMENT = 1;
 ALTER TABLE `chat_message` AUTO_INCREMENT = 1;
 
 -- ---------- 4. 独立库账号（与其它拆分服务同口径：% + localhost，密码同 .env）----------
-CREATE USER IF NOT EXISTS 'ershou_chat'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_chat'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_chat'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_chat'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_chat`.* TO 'ershou_chat'@'%';
 
-CREATE USER IF NOT EXISTS 'ershou_chat'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_chat'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_chat'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_chat'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_chat`.* TO 'ershou_chat'@'localhost';
 
 FLUSH PRIVILEGES;

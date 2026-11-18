@@ -1,11 +1,13 @@
-# 本地私有配置（已被 .gitignore 忽略，不会提交）
-# 启动方式： --spring.profiles.active=dev,local   （覆盖 application-dev.yml 中的占位符）
+# 本地覆盖配置（不含任何明文密钥）
+# 启动方式： --spring.profiles.active=dev,local
+# 真实值统一放仓库根 .env（已被 .gitignore 忽略），由 scripts/dev-*.ps1 等启动脚本载入；
+# IDEA 直接运行时请在 Run Configuration 里配置对应的环境变量。
 spring:
   datasource:
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
   data:
     redis:
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
 ershou:
   storage:
-    secret-key: __REDACTED_DB_PASSWORD__
+    secret-key: ${MINIO_ROOT_PASSWORD}

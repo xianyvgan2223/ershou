@@ -377,7 +377,7 @@ sequenceDiagram
 
 | 运行单元 | 形态 | 启动方式（详见 [README](../README.md)） |
 | --- | --- | --- |
-| Nacos / RabbitMQ / Seata / Sentinel | Docker 容器 | `docker compose -f ershou-cloud/docker/docker-compose.yml up -d` |
+| Nacos / RabbitMQ / Seata / Sentinel | Docker 容器 | `docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml up -d` |
 | MySQL / Redis / MinIO | 既有容器或本机服务 | 沿用旧项目容器（README 前置检查） |
 | gateway / user / item / order | 本地 JVM（`mvn spring-boot:run`，演示） | 首次 `mvn -f ershou-cloud/pom.xml -DskipTests install`，然后各模块目录 `mvn spring-boot:run`（4 个进程） |
 | 旧单体 | 本地 JVM | `java -jar ershou-server/target/ershou-server-1.0.0.jar`（反代目标，必须启动） |

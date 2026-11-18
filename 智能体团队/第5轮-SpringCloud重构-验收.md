@@ -164,7 +164,7 @@ cd E:\ershou
 powershell -ExecutionPolicy Bypass -File .\scripts\cloud-up.ps1
 
 # 2) 建库 + 迁移（幂等；已建可跳过）
-Get-Content .\ershou-cloud\sql\init-cloud-databases.sql -Raw | mysql --host=127.0.0.1 --user=root --password=__REDACTED_DB_PASSWORD__ --default-character-set=utf8mb4
+powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\init-cloud-databases.sql
 powershell -ExecutionPolicy Bypass -File .\ershou-cloud\sql\migrate-data.ps1
 # ⚠️ 注意：migrate-data.ps1 会 TRUNCATE 重灌分库（恢复 190 用户/17 商品/2 面交单基线），
 #    联调或演示期间**不要重跑**（会清掉演示产生的订单与库存变化）；只想核对一致性用参数 -DryRun。

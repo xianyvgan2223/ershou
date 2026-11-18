@@ -8,13 +8,11 @@
 --   ershou_order 账号 ershou_order ：meetup_order / undo_log(Seata AT)
 -- 旧库 ershou 保持不动（本轮只做一次性快照迁移，见 migrate-data.ps1）。
 --
--- 执行方式（root，幂等，可反复跑）：
---   mysql --host=127.0.0.1 --port=3306 --user=root --password=*** \
---         --default-character-set=utf8mb4 < ershou-cloud/sql/init-cloud-databases.sql
--- 或用脚本：scripts/cloud-up.ps1 会自动执行本文件并校验表清单。
+-- 执行方式（root，幂等，可反复跑；密码从 .env 读取，仓库里不落明文）：
+--   powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\init-cloud-databases.sql
 --
 -- 说明：
---   * 账号密码与 .env 的 MYSQL_PASSWORD 一致（本地开发；生产应换随机串并用环境变量注入）。
+--   * 脚本里的账号密码用 __MYSQL_PASSWORD__ 占位，由 scripts/run-sql.ps1 从 .env 替换。
 --   * 表结构 = 单体 ershou 库 SHOW CREATE TABLE 的结果，按云服务用途裁剪：
 --       - item 去掉 FULLTEXT(ngram) 索引（item-service 本轮不做全文检索，避免依赖 ngram 插件）
 --       - item 新增 sale_count INT NOT NULL DEFAULT 0（RabbitMQ 异步累加演示用）
@@ -23,7 +21,6 @@
 -- =============================================================
 
 SET NAMES utf8mb4;
-SET @pwd = '__REDACTED_DB_PASSWORD__';   -- 与 .env MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD 一致
 
 -- -------------------------------------------------------------
 -- 1. 建库（幂等）
@@ -36,18 +33,18 @@ CREATE DATABASE IF NOT EXISTS `ershou_order` DEFAULT CHARACTER SET utf8mb4 COLLA
 -- 2. 独立账号 + 授权（幂等；host 同时覆盖 % 与 localhost）
 --    注意：CREATE USER 不带明文回显；ALTER USER 保证重复执行时密码也一致
 -- -------------------------------------------------------------
-CREATE USER IF NOT EXISTS 'ershou_user'@'%'         IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_user'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_item'@'%'         IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_item'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_order'@'%'        IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_order'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_user'@'%'         IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_user'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_item'@'%'         IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_item'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_order'@'%'        IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_order'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_user'@'%'         IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_user'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_item'@'%'         IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_item'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_order'@'%'        IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_order'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_user'@'%'         IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_user'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_item'@'%'         IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_item'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_order'@'%'        IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_order'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_user`.*  TO 'ershou_user'@'%';
 GRANT ALL PRIVILEGES ON `ershou_user`.*  TO 'ershou_user'@'localhost';
 GRANT ALL PRIVILEGES ON `ershou_item`.*  TO 'ershou_item'@'%';

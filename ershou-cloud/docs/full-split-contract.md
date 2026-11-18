@@ -30,7 +30,7 @@
 - 前端路径与响应 JSON 保持不变（Web/App 零改动）。
 - 不要修改：`ershou-cloud/pom.xml`、`ershou-cloud-common/**`、`ershou-cloud-gateway/**`、其他成员服务、旧单体 `ershou-server/**`、前端。
 - 构建：`mvn -f ershou-cloud/ershou-<服务>-service/pom.xml -DskipTests package`（parent 用 `../pom.xml`；common 已 install 到本地仓库）。
-- 数据库：MySQL `127.0.0.1:3306`，root/`__REDACTED_DB_PASSWORD__`；Redis `6380`、密码同；Nacos `8848` 已在运行。
+- 数据库：MySQL `127.0.0.1:3306`，root 密码见 `.env` 的 `MYSQL_ROOT_PASSWORD`；Redis `6380`、密码见 `REDIS_PASSWORD`；Nacos `8848` 已在运行。
 - 可自行创建自己的数据库/表并执行数据迁移 SQL；SQL 落盘到 `ershou-cloud/sql/split-<服务>.sql`。
 - 完成后向 Lead 回报：端点清单、表清单、Feign 依赖、内部 API、构建/启动结果、遗留问题。
 

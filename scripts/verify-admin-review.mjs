@@ -18,8 +18,11 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SHOT_DIR = path.join(ROOT, '.build', 'admin-review')
@@ -31,7 +34,7 @@ const ADMIN_PHONE = '13800000009'
 const SELLER_PHONE = '13800000008'
 const SMS_CODE = '123456'
 /** 与 .env 的 REDIS_PASSWORD 一致；仅用于清测试号的验证码次数计数 */
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD
 
 let pass = 0
 let fail = 0
@@ -508,7 +511,7 @@ try {
            DELETE FROM favorite     WHERE item_id IN (${seeded.join(',')});
            DELETE FROM item_review  WHERE item_id IN (${seeded.join(',')});
            DELETE FROM item         WHERE id IN (${seeded.join(',')});`],
-        { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD ?? '__REDACTED_DB_PASSWORD__' } },
+        { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD } },
       )
       execFileSync('docker', ['exec', 'ershou-redis', 'redis-cli', '-a', REDIS_PASSWORD, '--no-auth-warning', 'DEL', 'ershou:admin:dashboard'], { stdio: 'ignore' })
       console.log(`  已清理商品 ${seeded.join(', ')}`)

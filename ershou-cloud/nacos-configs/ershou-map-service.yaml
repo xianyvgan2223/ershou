@@ -8,7 +8,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/ershou_map?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ershou_map
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
@@ -17,7 +17,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       database: 5          # 地图点位缓存 + Redis GEO，前缀 ershou:map:（本服务独占 db5）
       timeout: 3s
   cloud:
@@ -75,8 +75,8 @@ ershou:
     nearby-max-limit: 50
   amap:
     # 从单体配置迁移（单体 application.yml 的阿 env: AMAP_JS_KEY / AMAP_JS_SECURITY_CODE）
-    js-key: "__REDACTED_AMAP_KEY__"
-    js-security-code: "__REDACTED_AMAP_SECURITY_CODE__"
+    js-key: ${AMAP_JS_KEY:}
+    js-security-code: ${AMAP_JS_SECURITY_CODE:}
     # Web 服务 key（restapi.amap.com 逆地理反查用，需厂台绑 IP 白名单）。单体 .env 未配置 → 留空：
     # /api/v1/map/regeo 返回空候选（前端退化为手动填名称），不影响地图气泡与选点。
     web-key: ""

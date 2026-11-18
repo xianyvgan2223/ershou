@@ -95,8 +95,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\cloud-up.ps1
 # 证据：.build\cloud\logs\cloud-up-<时间戳>.log / .json（结构化断言）
 
 # 手工方式（等价）：
-docker compose -f .\ershou-cloud\docker\docker-compose.yml up -d --build
-docker compose -f .\ershou-cloud\docker\docker-compose.yml ps     # 等 4 个容器 running/healthy
+docker compose --env-file .env -f .\ershou-cloud\docker\docker-compose.yml up -d --build
+docker compose --env-file .env -f .\ershou-cloud\docker\docker-compose.yml ps     # 等 4 个容器 running/healthy
 ```
 
 | 容器 | 镜像 | 端口 | 访问/账号 |
@@ -114,10 +114,8 @@ docker compose -f .\ershou-cloud\docker\docker-compose.yml ps     # 等 4 个容
 > 这一步**不在** `cloud-up.ps1` 里（Docker 脚本不碰 MySQL）；首次演示/换数据后需手工执行一次，可重复。
 
 ```powershell
-# 1) 建库/建账号/建表（幂等；需要 MySQL root）
-$mysql = 'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe'
-Get-Content .\ershou-cloud\sql\init-cloud-databases.sql -Raw -Encoding UTF8 |
-  & $mysql --host=127.0.0.1 --port=3306 --user=root --password=<root 密码> --default-character-set=utf8mb4
+# 1) 建库/建账号/建表（幂等；密码从 .env 的 MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD 读取）
+powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\init-cloud-databases.sql
 
 # 2) 快照迁移（只读旧库 ershou → 新库；保留 id；可重复执行）
 powershell -ExecutionPolicy Bypass -File .\ershou-cloud\sql\migrate-data.ps1 -DryRun   # 先看计划
@@ -174,6 +172,9 @@ mvn -f .\ershou-cloud\pom.xml -DskipTests install
 ### 4.5 启动 4 个服务 + 旧单体（各开一个 PowerShell 窗口）
 
 启动顺序：**中间件 → Nacos 配置 → user/item/order → gateway → 旧单体 8080**（旧单体也可提前启动；未迁移接口在单体就绪前返回 502，属预期）。
+
+> ⚠️ 配置里的密码/密钥现在是 `${...}` 占位符：手工 `mvn spring-boot:run` 前必须先把仓库根 `.env` 载入当前 PowerShell 会话，否则会报 `Could not resolve placeholder 'MYSQL_PASSWORD'`。
+> 推荐直接用 `scripts\start-full-cloud.ps1`（自动载入 `.env`、发布 Nacos 配置并启动全部服务）。
 
 ```powershell
 cd E:\ershou
@@ -376,7 +377,7 @@ Get-NetTCPConnection -State Listen -LocalPort 8081,8082,8083,8088,8080 |
 # 2) 停中间件容器（默认保留数据卷：下次 up 后 Nacos 配置/RabbitMQ 数据还在）
 powershell -ExecutionPolicy Bypass -File .\scripts\cloud-down.ps1
 # 仅看计划：-DryRun；连数据卷一起删（会清空 Nacos 已发布配置，慎用）：-RemoveVolumes
-# 等价原生命令：docker compose -f .\ershou-cloud\docker\docker-compose.yml down
+# 等价原生命令：docker compose --env-file .env -f .\ershou-cloud\docker\docker-compose.yml down
 
 # 3) 既有容器（MySQL/Redis/MinIO/ES）不要删除，后续轮次仍要用；cloud-down 不会动它们
 ```

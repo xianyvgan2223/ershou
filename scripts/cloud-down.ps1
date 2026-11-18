@@ -31,6 +31,7 @@ param(
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $ComposeFile) { $ComposeFile = Join-Path $root 'ershou-cloud\docker\docker-compose.yml' }
+$envFile = Join-Path $root '.env'
 $logDir = Join-Path $root '.build\cloud\logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -50,7 +51,7 @@ if (-not $dockerOk) { Log '[FAIL] Docker 不可用（请先启动 Docker Desktop
 if (-not (Test-Path $ComposeFile)) { Log ('[FAIL] compose 文件不存在：' + $ComposeFile); $script:lines | Set-Content -Path $logFile -Encoding UTF8; exit 1 }
 
 # compose 语法校验
-$cfgOut = docker compose -f $ComposeFile config -q 2>&1
+$cfgOut = docker compose --env-file $envFile -f $ComposeFile config -q 2>&1
 if ($LASTEXITCODE -ne 0) {
   Log ('[FAIL] compose 语法校验失败：' + (($cfgOut | Out-String).Trim()))
   $script:lines | Set-Content -Path $logFile -Encoding UTF8
@@ -73,8 +74,8 @@ if ($DryRun) {
 
 Log ''
 Log ('正在停止中间件：docker ' + $downCmd)
-$out = & docker compose -f $ComposeFile down 2>&1
-if ($RemoveVolumes) { $out = & docker compose -f $ComposeFile down --volumes 2>&1 }
+$out = & docker compose --env-file $envFile -f $ComposeFile down 2>&1
+if ($RemoveVolumes) { $out = & docker compose --env-file $envFile -f $ComposeFile down --volumes 2>&1 }
 $code = $LASTEXITCODE
 ($out | ForEach-Object { '  ' + [string]$_ }) | ForEach-Object { Log $_ }
 if ($code -ne 0) {

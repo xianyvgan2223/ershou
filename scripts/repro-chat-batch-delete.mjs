@@ -11,14 +11,17 @@
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SHOT_DIR = path.join(ROOT, '.build', 'chat-batch-repro')
 const API = process.env.CHAT_API ?? 'http://127.0.0.1:8080/api/v1'
 const WEB = process.env.WEB_BASE ?? 'http://localhost:5173'
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD
 const SELLER_PHONE = '13800000008'
 const BUYER_PHONE = '13800000007'
 
@@ -215,7 +218,7 @@ try {
   // 清理
   execFileSync('C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe', ['-h', '127.0.0.1', '-P', '3306', '-u', 'ershou', '--default-character-set=utf8mb4', '-e',
     `use ershou; delete from chat_message where session_id in (${sids.join(',') || 0}); delete from chat_session where id in (${sids.join(',') || 0}); delete from item_review where item_id in (${itemIds.join(',') || 0}); delete from item where id in (${itemIds.join(',') || 0});`],
-    { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD ?? '__REDACTED_DB_PASSWORD__' } })
+    { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD } })
   console.log('')
   console.log(`截图：${SHOT_DIR}`)
   console.log('测试数据已清理')

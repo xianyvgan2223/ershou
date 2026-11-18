@@ -7,17 +7,17 @@
 --   * item 表（平台商品）不迁入本库 —— 归 item-service（ershou_item），平台服务通过 Feign 读写；
 --   * 本脚本不跨库写业务，只做一次性数据迁移（完成后旧库 ershou 停写）；
 --   * platform_* 表与旧库结构完全一致（含唯一键/索引），后续实体字段无需调整。
--- 执行：mysql -h127.0.0.1 -P3306 -uroot -p < split-platform.sql
+-- 执行：powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\split-platform.sql
 -- =============================================================
 
--- 1. 建库 + 独立账号（密码与 .env 一致：__REDACTED_DB_PASSWORD__）
+-- 1. 建库 + 独立账号（密码由 scripts/run-sql.ps1 从 .env 替换 __MYSQL_PASSWORD__）
 CREATE DATABASE IF NOT EXISTS `ershou_platform`
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 
-CREATE USER IF NOT EXISTS 'ershou_platform'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_platform'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_platform'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_platform'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_platform'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_platform'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_platform'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_platform'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_platform`.* TO 'ershou_platform'@'%';
 GRANT ALL PRIVILEGES ON `ershou_platform`.* TO 'ershou_platform'@'localhost';
 FLUSH PRIVILEGES;

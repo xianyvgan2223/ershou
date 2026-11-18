@@ -60,6 +60,20 @@ if ($Status) {
     exit 0
 }
 
+# 载入根目录 .env：nacos-configs/*.yaml 里的 ${MYSQL_PASSWORD} 等占位符由服务进程环境解析
+$envFile = Join-Path $root '.env'
+if (-not (Test-Path $envFile)) {
+    Write-Host '  [X] 缺少 .env：请先 copy .env.example .env 并填写密码' -ForegroundColor Red
+    exit 1
+}
+[System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) |
+    Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Za-z_][A-Za-z0-9_]*=' } |
+    ForEach-Object {
+        $line = ($_.TrimStart([char]0xFEFF) -split '#', 2)[0].Trim()
+        $k, $v = $line -split '=', 2
+        if ($k -and $v) { Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim() }
+    }
+
 Write-Host ''
 Write-Host '==============================' -ForegroundColor Cyan
 Write-Host ' 全量微服务后端启动' -ForegroundColor Cyan

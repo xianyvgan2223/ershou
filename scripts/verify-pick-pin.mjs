@@ -2,12 +2,15 @@
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const API = 'http://127.0.0.1:8080/api/v1'
 const WEB = 'http://localhost:5173'
 const OUT = 'E:\\ershou\\.build\\pick-pin'
 await mkdir(OUT, { recursive: true })
-const RP = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const RP = process.env.REDIS_PASSWORD
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const post = async (u, b, t) => {
   const h = { 'Content-Type': 'application/json' }

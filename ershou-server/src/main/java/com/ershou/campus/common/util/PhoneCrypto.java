@@ -17,7 +17,10 @@ public class PhoneCrypto {
 
     private final SecretKeySpec keySpec;
 
-    public PhoneCrypto(@Value("${ershou.crypto.phone-key:__REDACTED_PHONE_KEY__}") String key) {
+    public PhoneCrypto(@Value("${ershou.crypto.phone-key}") String key) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("ershou.crypto.phone-key 未配置（见 .env 的 PHONE_AES_KEY）");
+        }
         byte[] raw = new byte[16];
         byte[] src = key.getBytes(StandardCharsets.UTF_8);
         System.arraycopy(src, 0, raw, 0, Math.min(src.length, 16));

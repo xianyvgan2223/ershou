@@ -58,7 +58,7 @@
 ## 二、数据拆分与隔离（**硬要求**）
 
 ### 2.1 MySQL 分库（同一个 MySQL 实例、**独立 schema + 独立账号**，改 URL 即可物理拆分）
-| 库 | 账号（密码统一 `__REDACTED_DB_PASSWORD__`） | 表（本轮） |
+| 库 | 账号（密码统一取 `.env` 的 `MYSQL_PASSWORD`） | 表（本轮） |
 | --- | --- | --- |
 | `ershou_user` | `ershou_user` | `sys_user`、`school`、`campus` |
 | `ershou_item` | `ershou_item` | `item`（新增 `sale_count INT DEFAULT 0`）、`item_category`、`undo_log`（Seata AT 必需） |
@@ -224,7 +224,7 @@ seata:
 ---
 
 ## 七、验收标准（QA + Lead 逐条给证据）
-1. **Docker**：`docker compose -f ershou-cloud/docker/docker-compose.yml up -d` 后 nacos/rabbitmq/seata/sentinel 四容器 healthy；`docker ps` 证据；Redis 沿用现有 6380 容器。
+1. **Docker**：`docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml up -d` 后 nacos/rabbitmq/seata/sentinel 四容器 healthy；`docker ps` 证据；Redis 沿用现有 6380 容器。
 2. **构建**：`mvn -f ershou-cloud/pom.xml -DskipTests package` 成功（5 模块）。
 3. **启动/注册**：4 服务启动成功并注册 Nacos（`GET /nacos/v1/ns/service/list` 含 4 服务）；Nacos 配置中心 4 个 dataId 存在。
 4. **数据库拆分**：`ershou_user/item/order` 三库各自表清单、账号独立；数据迁移后行数与旧库对应表一致（贴 SQL 输出）；旧库未被修改。

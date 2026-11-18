@@ -8,7 +8,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/ershou_item?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ershou_item
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
@@ -17,7 +17,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       database: 2          # 商品缓存/浏览量/发布限额，前缀 ershou:item:
       timeout: 3s
   # Elasticsearch：商品搜索（索引 ershou_item；不可用时降级 MySQL LIKE，见 ershou.search.fallback-to-db）
@@ -38,8 +38,8 @@ spring:
   rabbitmq:
     host: 127.0.0.1
     port: 5672
-    username: guest
-    password: guest
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: /
     template:
       retry:
@@ -84,8 +84,8 @@ seata:
       server-addr: 127.0.0.1:8848
       application: seata-server
       group: SEATA_GROUP
-      username: nacos
-      password: nacos
+      username: ${NACOS_AUTH_USERNAME:}
+      password: ${NACOS_AUTH_PASSWORD:}
       cluster: default
   config:
     type: file

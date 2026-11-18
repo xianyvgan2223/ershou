@@ -11,15 +11,18 @@
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SHOT_DIR = path.join(ROOT, '.build', 'profile-verify')
 const API = process.env.PROFILE_API ?? 'http://127.0.0.1:8080/api/v1'
 const WEB = process.env.WEB_BASE ?? 'http://localhost:5173'
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
-const MYSQL_PWD = process.env.MYSQL_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD
+const MYSQL_PWD = process.env.MYSQL_PASSWORD
 /** 空数据账号：不带任何发布/收藏（13800000006 是干净的演示号） */
 const EMPTY_PHONE = '13800000006'
 /** 有数据账号：验收时会用它的身份造数据 */

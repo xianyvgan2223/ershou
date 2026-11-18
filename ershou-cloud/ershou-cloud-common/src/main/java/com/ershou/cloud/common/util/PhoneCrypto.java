@@ -18,8 +18,11 @@ public class PhoneCrypto {
     private final SecretKeySpec keySpec;
 
     public PhoneCrypto(String key) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("ershou.crypto.phone-key 未配置（见 .env 的 PHONE_CRYPTO_KEY）");
+        }
         byte[] raw = new byte[16];
-        byte[] src = (key == null ? "__REDACTED_PHONE_KEY__" : key).getBytes(StandardCharsets.UTF_8);
+        byte[] src = key.getBytes(StandardCharsets.UTF_8);
         System.arraycopy(src, 0, raw, 0, Math.min(src.length, 16));
         this.keySpec = new SecretKeySpec(raw, "AES");
     }

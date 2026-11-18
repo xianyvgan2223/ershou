@@ -8,7 +8,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/ershou_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ershou_platform
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
@@ -17,7 +17,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       # 第 8 轮拆分：平台业务缓存/库存独立 db4（db0 只放 Sa-Token 会话；db1/2/3 分别 user/item/order）
       database: 4
       timeout: 3s

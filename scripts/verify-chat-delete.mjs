@@ -17,14 +17,17 @@
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SHOT_DIR = path.join(ROOT, '.build', 'chat-delete')
 const API = process.env.CHAT_API ?? 'http://127.0.0.1:8080/api/v1'
 const WEB = process.env.WEB_BASE ?? 'http://localhost:5173'
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD
 
 const SELLER_PHONE = '13800000008'
 const BUYER_PHONE = '13800000007'
@@ -328,7 +331,7 @@ try {
         'docker',
         [
           'exec', 'ershou-mysql', 'mysql', '-h', '127.0.0.1', '-uroot',
-          '-p' + (process.env.MYSQL_ROOT_PASSWORD ?? '__REDACTED_DB_PASSWORD__'),
+          '-p' + process.env.MYSQL_ROOT_PASSWORD,
           '-e', `use ershou; delete from chat_message where session_id=${sessionId}; delete from chat_session where id=${sessionId};`,
         ],
         { stdio: 'ignore' },
@@ -341,7 +344,7 @@ try {
         'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe',
         ['-h', '127.0.0.1', '-P', '3306', '-u', 'ershou', '--default-character-set=utf8mb4',
          '-e', `use ershou; delete from chat_message where session_id=${sessionId}; delete from chat_session where id=${sessionId}; delete from item_review where item_id=${itemId}; delete from item where id=${itemId};`],
-        { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD ?? '__REDACTED_DB_PASSWORD__' } },
+        { stdio: 'ignore', env: { ...process.env, MYSQL_PWD: process.env.MYSQL_PASSWORD } },
       )
       console.log(`  已清理会话 #${sessionId} 与商品 #${itemId}`)
     } catch (e) {

@@ -53,14 +53,14 @@ try {
   $st = Invoke-RestMethod -Uri "$base/api/v1/map/amap-status"
   Check 'code=0' ($st.code -eq 0) ($st | ConvertTo-Json -Compress)
   Check 'configured=true（key 已从环境变量读到）' ($st.data.configured -eq $true) ($st.data.hint)
-  Check '响应里不含 key 本身' (($st | ConvertTo-Json -Compress) -notmatch '997b012c') '疑似泄露'
+  Check '响应里不含 key 本身' (($st | ConvertTo-Json -Compress) -notmatch [regex]::Escape($env:AMAP_JS_KEY)) '疑似泄露'
 
   Write-Host ''
   Write-Host '=== 2. amap-html（WebView 要加载的页面）===' -ForegroundColor Cyan
   $html = (Invoke-WebRequest -Uri "$base/api/v1/map/amap-html?campusId=2" -UseBasicParsing).Content
   Check '返回 HTML 长度正常（>2000 字符）' ($html.Length -gt 2000) ('实际 ' + $html.Length)
   Check 'key 占位符已被替换' ($html -notmatch '%JS_KEY%') '仍是占位符'
-  Check '注入了真实 key' ($html -match '__REDACTED_AMAP_KEY__') '未注入'
+  Check '注入了真实 key' ($env:AMAP_JS_KEY -and $html.Contains($env:AMAP_JS_KEY)) '未注入'
   Check '注入了安全密钥' ($html -match 'securityJsCode') '未注入'
   Check 'campusId 已带入页面' ($html -match 'var CAMPUS_ID = 2;') '未带入'
   Check '含点位气泡渲染逻辑' ($html -match 'bubble' -and $html -match 'AMap.Marker') '缺渲染逻辑'

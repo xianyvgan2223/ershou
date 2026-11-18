@@ -39,8 +39,8 @@ services:
     image: rabbitmq:3-management
     container_name: ershou-rabbitmq
     environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-guest}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -69,6 +69,12 @@ services:
       - ./seata/application.yml:/seata-server/resources/application.yml:ro
     environment:
       - TZ=Asia/Shanghai
+      # 真实值放仓库根 .env（cloud-up.ps1 / 文档命令用 --env-file 传入）
+      - SEATA_CONSOLE_USERNAME=${SEATA_CONSOLE_USERNAME:?set in .env}
+      - SEATA_CONSOLE_PASSWORD=${SEATA_CONSOLE_PASSWORD:?set in .env}
+      - SEATA_NACOS_USERNAME=${SEATA_NACOS_USERNAME:?set in .env}
+      - SEATA_NACOS_PASSWORD=${SEATA_NACOS_PASSWORD:?set in .env}
+      - SEATA_SECRET_KEY=${SEATA_SECRET_KEY:?set in .env}
     restart: "no"
     networks: [ershou-cloud-net]
 

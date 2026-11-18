@@ -17,15 +17,18 @@
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, '.build', 'item-edit')
 const API = process.env.API_BASE ?? 'http://127.0.0.1:8080/api/v1'
 const WEB = process.env.WEB_BASE ?? 'http://localhost:5173'
-const RP = process.env.REDIS_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
-const MYSQL_PWD = process.env.MYSQL_PASSWORD ?? '__REDACTED_DB_PASSWORD__'
+const RP = process.env.REDIS_PASSWORD
+const MYSQL_PWD = process.env.MYSQL_PASSWORD
 const MYSQL = 'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe'
 const PHONE_SELLER = '13800000006' // 干净号（id 117，无历史商品，用它造数据不污染演示）
 const PHONE_BUYER = '13800000007' // 买家 id 9

@@ -7,18 +7,18 @@
 --   2) 归属约定（full-split-contract 第六节）：ai_audit_record 归本库，item-service 不建/不写；
 --      item_review 归 ershou_item，不在本库；
 --   3) 本脚本只在切换前执行一次；旧库不再写入这些表。
--- 执行：mysql -h127.0.0.1 -P3306 -uroot -p__REDACTED_DB_PASSWORD__ --default-character-set=utf8mb4 < split-admin.sql
+-- 执行：powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\split-admin.sql
 -- =============================================================
 
 -- ---------- 1. 库与账号 ----------
 CREATE DATABASE IF NOT EXISTS `ershou_admin`
   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 
-CREATE USER IF NOT EXISTS 'ershou_admin'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-CREATE USER IF NOT EXISTS 'ershou_admin'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_admin'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
+CREATE USER IF NOT EXISTS 'ershou_admin'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
 -- 幂等校准密码（账号可能是 lead 预建的）
-ALTER USER 'ershou_admin'@'%' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
-ALTER USER 'ershou_admin'@'localhost' IDENTIFIED BY '__REDACTED_DB_PASSWORD__';
+ALTER USER 'ershou_admin'@'%' IDENTIFIED BY '__MYSQL_PASSWORD__';
+ALTER USER 'ershou_admin'@'localhost' IDENTIFIED BY '__MYSQL_PASSWORD__';
 GRANT ALL PRIVILEGES ON `ershou_admin`.* TO 'ershou_admin'@'%';
 GRANT ALL PRIVILEGES ON `ershou_admin`.* TO 'ershou_admin'@'localhost';
 FLUSH PRIVILEGES;

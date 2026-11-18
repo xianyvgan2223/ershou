@@ -6,6 +6,7 @@ import com.ershou.cloud.common.web.TraceIdFilter;
 import com.ershou.cloud.common.web.UserContextInterceptor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -33,8 +34,10 @@ public class CloudCommonAutoConfiguration {
         return new GlobalExceptionHandler();
     }
 
+    /** 只有配置了 ershou.crypto.phone-key 的服务（user-service）才需要手机号加解密 Bean。 */
     @Bean
-    public PhoneCrypto phoneCrypto(@Value("${ershou.crypto.phone-key:__REDACTED_PHONE_KEY__}") String phoneKey) {
+    @ConditionalOnProperty(name = "ershou.crypto.phone-key")
+    public PhoneCrypto phoneCrypto(@Value("${ershou.crypto.phone-key}") String phoneKey) {
         return new PhoneCrypto(phoneKey);
     }
 

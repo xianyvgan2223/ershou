@@ -9,11 +9,14 @@
  * 用法：node scripts/audit-cache.mjs
  */
 import { execFileSync } from 'node:child_process'
+import { loadEnvFile } from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 
+try { loadEnvFile(new URL('../.env', import.meta.url)) } catch {}
+
 const API = 'http://127.0.0.1:8080/api/v1'
-const RP = '__REDACTED_DB_PASSWORD__'
-const MYSQL_PWD = '__REDACTED_DB_PASSWORD__'
+const RP = process.env.REDIS_PASSWORD
+const MYSQL_PWD = process.env.MYSQL_PASSWORD
 const MYSQL = 'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe'
 
 let pass = 0

@@ -86,8 +86,10 @@ ershou:
     # 过期任务 cron（默认每小时 :30）；开发期想验证任务可临时改 */10 * * * * ?
     expire-cron: "${ITEM_EXPIRE_CRON:0 30 * * * ?}"
   crypto:
-    # 手机号 AES 密钥（16 位）。生产环境必须换成随机值并用环境变量注入
-    phone-key: ${PHONE_AES_KEY:__REDACTED_PHONE_KEY__}
+    # 手机号 AES 密钥（16 位）。真实值放 .env（PHONE_AES_KEY），缺失时启动失败
+    phone-key: ${PHONE_AES_KEY}
+    # 聊天正文加密密钥。真实值放 .env（CHAT_CONTENT_KEY），缺了会导致历史消息解不开
+    chat-key: ${CHAT_CONTENT_KEY}
   amap:
     # 高德 Web端(JS API) key：**给前端用的公开 key，不是密钥**（真正要保密的是 Web 服务 key）。
     # 放后端是为了让移动端（WebView 承载高德地图）不用把 key 打进 App、也不用用户手输：

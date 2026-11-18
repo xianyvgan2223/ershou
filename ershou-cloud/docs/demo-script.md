@@ -80,8 +80,8 @@ docker ps --format "table {{.Names}}\t{{.Status}}"   # nacos/rabbitmq/seata/sent
 ### 第 2 步 · 建分库 + 迁移数据（只需执行一次，可重复执行）
 
 ```powershell
-# 2.1 建库 + 建表 + 独立账号（幂等；密码统一 __REDACTED_DB_PASSWORD__，见设计 §2.1）
-mysql --host=127.0.0.1 --port=3306 --user=root --password=<根密码> < .\ershou-cloud\sql\init-cloud-databases.sql
+# 2.1 建库 + 建表 + 独立账号（幂等；密码统一取 .env 的 MYSQL_PASSWORD，见设计 §2.1）
+powershell -ExecutionPolicy Bypass -File .\scripts\run-sql.ps1 -File .\ershou-cloud\sql\init-cloud-databases.sql
 
 # 2.2 从旧库 ershou 快照迁移到三库（幂等：先 TRUNCATE 再 INSERT SELECT；只读旧库）
 powershell -ExecutionPolicy Bypass -File .\ershou-cloud\sql\migrate-data.ps1
@@ -104,9 +104,9 @@ powershell -ExecutionPolicy Bypass -File .\ershou-cloud\sql\migrate-data.ps1
 
 ```powershell
 $mysql='C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe'
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT COUNT(*), SUM(status=2) FROM item;"      # 17  16
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=__REDACTED_DB_PASSWORD__ --database=ershou_order -N -B -e "SELECT COUNT(*) FROM meetup_order;"           # 2
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_user --password=__REDACTED_DB_PASSWORD__ --database=ershou_user -N -B -e "SELECT COUNT(*) FROM sys_user;"                 # 190
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT COUNT(*), SUM(status=2) FROM item;"      # 17  16
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=$env:MYSQL_PASSWORD --database=ershou_order -N -B -e "SELECT COUNT(*) FROM meetup_order;"           # 2
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_user --password=$env:MYSQL_PASSWORD --database=ershou_user -N -B -e "SELECT COUNT(*) FROM sys_user;"                 # 190
 ```
 
 > 注意：迁移是**一次性快照**（设计 §2.1）。迁移后新服务的写操作不会回写旧库 `ershou`，旧库也未被子脚本修改。
@@ -306,7 +306,7 @@ curl.exe -s "$G/items/$ITEM_ID"
 
 ```powershell
 $mysql='C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe'
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT id,title,stock FROM item WHERE id=$ITEM_ID;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT id,title,stock FROM item WHERE id=$ITEM_ID;"
 ```
 
 下单（**注意用库存 > 0 的商品**）：
@@ -320,8 +320,8 @@ curl.exe -s -X POST "$G/meetup-orders" -H "Authorization: Bearer $TOKEN" -H "Con
 **DB 证据**（设计 §七.5）：
 
 ```powershell
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT stock FROM item WHERE id=$ITEM_ID;"     # 比下单前 -1
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=__REDACTED_DB_PASSWORD__ --database=ershou_order -N -B -e "SELECT id,order_no,buyer_id,item_id,quantity,status FROM meetup_order ORDER BY id DESC LIMIT 1;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT stock FROM item WHERE id=$ITEM_ID;"     # 比下单前 -1
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=$env:MYSQL_PASSWORD --database=ershou_order -N -B -e "SELECT id,order_no,buyer_id,item_id,quantity,status FROM meetup_order ORDER BY id DESC LIMIT 1;"
 # 预期：status=2（待面交/待自提）、quantity=1
 ```
 
@@ -338,10 +338,10 @@ curl.exe -s "$G/meetup-orders/mine?pageNum=1&pageSize=20" -H "Authorization: Bea
 先记另一个可购商品的库存与订单数：
 
 ```powershell
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT id,stock FROM item WHERE status=2 AND stock>0 ORDER BY id LIMIT 3;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT id,stock FROM item WHERE status=2 AND stock>0 ORDER BY id LIMIT 3;"
 $RB_ID = 18   # 换成一个 stock>0 且不等于 $ITEM_ID 的商品
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT stock FROM item WHERE id=$RB_ID;"
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=__REDACTED_DB_PASSWORD__ --database=ershou_order -N -B -e "SELECT COUNT(*) FROM meetup_order WHERE item_id=$RB_ID;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT stock FROM item WHERE id=$RB_ID;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_order --password=$env:MYSQL_PASSWORD --database=ershou_order -N -B -e "SELECT COUNT(*) FROM meetup_order WHERE item_id=$RB_ID;"
 ```
 
 触发回滚：
@@ -366,7 +366,7 @@ S6 下单成功后等 1~3 秒：
 
 ```powershell
 Start-Sleep -Seconds 3
-& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=__REDACTED_DB_PASSWORD__ --database=ershou_item -N -B -e "SELECT id,sale_count FROM item WHERE id=$ITEM_ID;"
+& $mysql --host=127.0.0.1 --port=3306 --user=ershou_item --password=$env:MYSQL_PASSWORD --database=ershou_item -N -B -e "SELECT id,sale_count FROM item WHERE id=$ITEM_ID;"
 ```
 
 **预期**：`sale_count` 比下单前 +1（= 本次 quantity）。
@@ -444,7 +444,7 @@ curl.exe -s "$G/platform/shop/points?campusId=2"
 | S8 报 `Seata can not get TC` / 连接超时 | Seata Server 不可用或 `vgroup-mapping` 错 | `docker ps`/Seata 控制台 7091；核对设计 §5.1 的 registry/vgroup-mapping（`ershou_tx_group` → `default`） |
 | S9 `sale_count` 不变 | 消费者没起 / 队列绑定缺失 / 消息进了死信 | RabbitMQ 管理台看队列 `ershou.item.order-created.queue` 有没有 consumers、messages 积压；item-service 日志找 `order-created`；检查 Redis db2 幂等键 |
 | S10 没有 429 | Sentinel 规则没加载 / 并发不够 / 限流未生效 | 看 gateway 启动日志是否有 Sentinel 规则初始化；Dashboard 8858 看 `/api/v1/items` 资源阈值；重跑 2~3 轮（脚本已内置 3 轮重试） |
-| 脚本把「DB 校验」标 SKIP | 找不到 mysql 客户端 / 三库账号未建 | 用 `-MySQLPath '完整路径'`；先执行第 2 步 init sql；`ershou_item`/`ershou_order` 账号密码为 `__REDACTED_DB_PASSWORD__` |
+| 脚本把「DB 校验」标 SKIP | 找不到 mysql 客户端 / 三库账号未建 | 用 `-MySQLPath '完整路径'`；先执行第 2 步 init sql；`ershou_item`/`ershou_order` 账号密码见 `.env` 的 `MYSQL_PASSWORD` |
 | 迁移日志末尾「新库表行数」全 0 | 迁移脚本汇总段统计口径问题（**数据已实际迁移**） | 以逐表 `[OK]` 段与第 2 步 SQL 直连为准；QA 复核先看逐表行数对比 |
 | 中文乱码 / 脚本解析报错 | 脚本被保存成 UTF-8 无 BOM（PS 5.1 读中文会乱） | 用 VSCode 另存为 `UTF-8 with BOM`；本仓库脚本都应带 BOM |
 | 重跑后库存耗尽 | 16 件在售商品每件 stock=1，每次演示消耗 1 件 | 重跑第 2 步 `migrate-data.ps1` 重灌（会 TRUNCATE 新库后重迁）；或 `UPDATE item SET stock=1 WHERE ...`；或换商品 |

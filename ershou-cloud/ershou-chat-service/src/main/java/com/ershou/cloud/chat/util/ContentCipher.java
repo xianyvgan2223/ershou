@@ -18,7 +18,7 @@ import java.util.Base64;
  * <p>AES/GCM + 随机 IV，输出 {@code v1:base64(iv||密文||tag)}：
  * 带版本前缀以区分"已加密文本"与"图片 URL / 卡片 JSON"这类不需要加密的内容。
  *
- * <p>⚠️ 迁移兼容：chat-service 必须使用与旧单体相同的 chat-key（默认 __REDACTED_CHAT_KEY__），
+ * <p>⚠️ 迁移兼容：chat-service 必须使用与旧单体相同的 chat-key（值见 .env 的 CHAT_CONTENT_KEY），
  * 否则从旧库迁过来的历史消息无法解密。密钥在 Nacos {@code ershou.crypto.chat-key} 配置。
  */
 @Component
@@ -32,7 +32,7 @@ public class ContentCipher {
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
-    public ContentCipher(@Value("${ershou.crypto.chat-key:__REDACTED_CHAT_KEY__}") String rawKey) {
+    public ContentCipher(@Value("${ershou.crypto.chat-key}") String rawKey) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(rawKey.getBytes(StandardCharsets.UTF_8));

@@ -7,7 +7,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/ershou_user?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ershou_user
-    password: __REDACTED_DB_PASSWORD__
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
@@ -16,7 +16,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6380
-      password: __REDACTED_DB_PASSWORD__
+      password: ${REDIS_PASSWORD}
       database: 1          # 业务键（验证码/登录限流）落 db1，前缀 ershou:user:
       timeout: 3s
   # OpenFeign（T101）：公开主页 onSaleCount 调 item-service。
@@ -61,7 +61,7 @@ ershou:
     # SaTokenRedisConfig 用：会话库固定 db0（host/port/password 复用 spring.data.redis.*）
     session-redis-database: 0
   crypto:
-    phone-key: __REDACTED_PHONE_KEY__
+    phone-key: ${PHONE_CRYPTO_KEY}
   sms:
     mock: true
     mock-code: "123456"

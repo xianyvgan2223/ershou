@@ -20,8 +20,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\cloud-down.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\cloud-down.ps1 -DryRun
 
 # 等价的原生命令
-docker compose -f ershou-cloud/docker/docker-compose.yml up -d --build
-docker compose -f ershou-cloud/docker/docker-compose.yml down
+docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml up -d --build
+docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml down
 ```
 
 证据输出：`.build/cloud/logs/cloud-up-<时间戳>.log`（全过程）与 `.json`（结构化断言）。
@@ -102,7 +102,7 @@ environment:
   - TZ=Asia/Shanghai
   - SEATA_IP=${SEATA_IP_HOST}        # 例如 10.34.14.246（必须宿主可达、非 127.0.0.1）
 ```
-1. `docker compose -f ershou-cloud/docker/docker-compose.yml up -d seata` 重启 TC；
+1. `docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml up -d seata` 重启 TC；
 2. 复核注册地址：`GET /nacos/v1/ns/instance/list?serviceName=seata-server&groupName=SEATA_GROUP`
    → `ip` 应为 `SEATA_IP_HOST`（不再是 172.x）；
 3. platform-dev 把 Nacos 两个 dataId 的 `seata.registry.type` 从 `file` 改回 `nacos`（`grouplist` 可保留，无害），

@@ -23,9 +23,22 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$root = Split-Path -Parent $PSScriptRoot
+$envFile = Join-Path $root '.env'
+if (Test-Path $envFile) {
+  [System.IO.File]::ReadAllLines($envFile, [System.Text.Encoding]::UTF8) | Where-Object { ($_ -split '#', 2)[0] -match '^\s*[A-Za-z_]+=' } | ForEach-Object {
+    $line = $_.TrimStart([char]0xFEFF).Trim()
+    $k, $v = (($line -split '#', 2)[0]) -split '=', 2
+    if ($k -and $v) { Set-Item -Path ('env:' + $k.Trim()) -Value $v.Trim() }
+  }
+}
+if (-not $env:MYSQL_PASSWORD -or -not $env:REDIS_PASSWORD) {
+  Write-Host '缺少 MYSQL_PASSWORD / REDIS_PASSWORD：请先在仓库根 .env 中配置' -ForegroundColor Red
+  exit 1
+}
 $MYSQL = 'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe'
-$RedisPwd = if ($env:REDIS_PASSWORD) { $env:REDIS_PASSWORD } else { '__REDACTED_DB_PASSWORD__' }
-$env:MYSQL_PWD = if ($env:MYSQL_PASSWORD) { $env:MYSQL_PASSWORD } else { '__REDACTED_DB_PASSWORD__' }
+$RedisPwd = $env:REDIS_PASSWORD
+$env:MYSQL_PWD = $env:MYSQL_PASSWORD
 $API = 'http://127.0.0.1:8080/api/v1'
 
 function Invoke-Sql([string]$sql, [switch]$Table) {

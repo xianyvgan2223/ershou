@@ -45,6 +45,7 @@ param(
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $ComposeFile) { $ComposeFile = Join-Path $root 'ershou-cloud\docker\docker-compose.yml' }
+$envFile = Join-Path $root '.env'
 if (-not $PublishScript) { $PublishScript = Join-Path $root 'scripts\cloud-publish-config.ps1' }
 $logDir = Join-Path $root '.build\cloud\logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
@@ -96,7 +97,7 @@ if (-not (Test-Path $ComposeFile)) {
 Record 'E2' 'compose 文件存在' $true $ComposeFile
 
 # compose 语法校验（只解析不启动）
-$cfgOut = docker compose -f $ComposeFile config -q 2>&1
+$cfgOut = docker compose --env-file $envFile -f $ComposeFile config -q 2>&1
 Record 'E3' 'docker compose config 语法校验' ($LASTEXITCODE -eq 0) (($cfgOut | Out-String).Trim())
 
 # sentinel jar：Dockerfile 里 COPY sentinel-dashboard.jar，缺失则无法 --build
@@ -138,9 +139,9 @@ Log ('  $ docker ' + $upArgs)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 if ($SkipBuild) {
   # 跳过镜像重建（sentinel jar 不变时省时间；镜像必须已存在）
-  $upOut = & docker compose -f $ComposeFile up -d 2>&1
+  $upOut = & docker compose --env-file $envFile -f $ComposeFile up -d 2>&1
 } else {
-  $upOut = & docker compose -f $ComposeFile up -d --build 2>&1
+  $upOut = & docker compose --env-file $envFile -f $ComposeFile up -d --build 2>&1
 }
 $upExit = $LASTEXITCODE
 $sw.Stop()
