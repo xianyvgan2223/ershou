@@ -1,4 +1,4 @@
-﻿<#
+﻿﻿<#
 .SYNOPSIS
   用 USB 数据线把手机连到本机后端（adb reverse 隧道），**不依赖 WiFi 同网段、也不怕 IP 变**。
 

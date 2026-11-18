@@ -1,4 +1,4 @@
-﻿<#
+﻿﻿<#
 .SYNOPSIS
   第 5 轮 Spring Cloud：停止 Docker 中间件（Nacos / RabbitMQ / Seata / Sentinel），可选删除数据卷。
 
