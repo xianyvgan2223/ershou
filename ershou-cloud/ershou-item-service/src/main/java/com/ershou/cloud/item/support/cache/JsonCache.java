@@ -1,7 +1,10 @@
 package com.ershou.cloud.item.support.cache;
 
+import com.ershou.cloud.common.cache.CacheEvictChannel;
+import com.ershou.cloud.common.cache.RawLocalCache;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -11,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +48,16 @@ public class JsonCache {
     /** 分布式锁客户端（缓存重建锁；值仍走 StringRedisTemplate） */
     private final RedissonClient redisson;
 
+    /** L2 进程内缓存：只存 raw JSON，避免就地修改污染对象 */
+    private RawLocalCache local;
+
+    @PostConstruct
+    void initLocal() {
+        if (props.isEnabled() && props.isLocalEnabled()) {
+            local = new RawLocalCache(props.getLocalMaxBytes(), props.getLocalTtl());
+        }
+    }
+
     /** 读结果：hit=false 未命中；hit=true 且 value=null 表示命中了"空值缓存" */
     public record Hit<T>(boolean hit, T value) {
 
@@ -61,7 +75,14 @@ public class JsonCache {
             return Hit.miss();
         }
         try {
-            return parse(redis.opsForValue().get(key), type);
+            String raw = localGet(key);
+            if (raw == null) {
+                raw = redis.opsForValue().get(key);
+                if (raw != null) {
+                    localPut(key, raw);
+                }
+            }
+            return parse(raw, type);
         } catch (Exception e) {
             log.warn("[cache][get] 读取失败，降级回源 key={}：{}", key, e.getMessage());
             return Hit.miss();
@@ -79,9 +100,29 @@ public class JsonCache {
             return result;
         }
         try {
-            List<String> raws = redis.opsForValue().multiGet(keys);
+            String[] raws = new String[keys.size()];
+            List<Integer> missingIdx = new ArrayList<>();
+            List<String> missingKeys = new ArrayList<>();
             for (int i = 0; i < keys.size(); i++) {
-                result.add(parse(raws == null ? null : raws.get(i), type));
+                String raw = localGet(keys.get(i));
+                raws[i] = raw;
+                if (raw == null) {
+                    missingIdx.add(i);
+                    missingKeys.add(keys.get(i));
+                }
+            }
+            if (!missingKeys.isEmpty()) {
+                List<String> fetched = redis.opsForValue().multiGet(missingKeys);
+                for (int j = 0; j < missingIdx.size(); j++) {
+                    String raw = fetched == null ? null : fetched.get(j);
+                    raws[missingIdx.get(j)] = raw;
+                    if (raw != null) {
+                        localPut(missingKeys.get(j), raw);
+                    }
+                }
+            }
+            for (String raw : raws) {
+                result.add(parse(raw, type));
             }
         } catch (Exception e) {
             log.warn("[cache][mget] 读取失败，降级回源 keys={}：{}", keys.size(), e.getMessage());
@@ -96,7 +137,9 @@ public class JsonCache {
             return;
         }
         try {
-            redis.opsForValue().set(key, json.writeValueAsString(value), jitter(ttl));
+            String raw = json.writeValueAsString(value);
+            localPut(key, raw);
+            redis.opsForValue().set(key, raw, jitter(ttl));
         } catch (Exception e) {
             log.warn("[cache][set] 写入失败，忽略 key={}：{}", key, e.getMessage());
         }
@@ -108,7 +151,14 @@ public class JsonCache {
             return false;
         }
         try {
-            return NULL_SENTINEL.equals(redis.opsForValue().get(key));
+            String raw = localGet(key);
+            if (raw == null) {
+                raw = redis.opsForValue().get(key);
+                if (raw != null) {
+                    localPut(key, raw);
+                }
+            }
+            return NULL_SENTINEL.equals(raw);
         } catch (Exception e) {
             log.warn("[cache][isNull] 读取失败，按未命中处理 key={}：{}", key, e.getMessage());
             return false;
@@ -121,9 +171,67 @@ public class JsonCache {
             return;
         }
         try {
+            localPut(key, NULL_SENTINEL);
             redis.opsForValue().set(key, NULL_SENTINEL, jitter(ttl));
         } catch (Exception e) {
             log.warn("[cache][setNull] 写入失败，忽略 key={}：{}", key, e.getMessage());
+        }
+    }
+
+    /**
+     * 写路径统一失效：先清本地（L2），再删 Redis（L3），最后广播给同服务其它实例。
+     * Redis 删除失败也继续广播/清本地——缓存脏了最多活到 TTL，不能因此让写请求失败。
+     */
+    public void evict(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return;
+        }
+        invalidateLocal(keys);
+        try {
+            redis.delete(keys);
+        } catch (Exception e) {
+            log.warn("[cache][evict] 删除 Redis 失败，等 TTL 自然过期 keys={}：{}", keys.size(), e.getMessage());
+        }
+        publishEvict(keys);
+    }
+
+    public void invalidateLocal(Collection<String> keys) {
+        if (props.isLocalEnabled() && local != null) {
+            local.invalidate(keys);
+        }
+    }
+
+    public void clearLocal() {
+        if (local != null) {
+            local.invalidateAll();
+        }
+    }
+
+    /** 广播给 item-service 的其它实例，清掉它们的 L2；消息格式见 CacheEvictChannel */
+    public void publishEvict(Collection<String> keys) {
+        if (!props.isPubsubEnabled() || keys == null || keys.isEmpty()) {
+            return;
+        }
+        for (String key : keys) {
+            try {
+                redis.convertAndSend(CacheEvictChannel.NAME,
+                        CacheEvictChannel.message(CacheEvictChannel.SCOPE_ITEM, key));
+            } catch (Exception e) {
+                log.warn("[cache][pubsub] 失效广播失败 key={}：{}", key, e.getMessage());
+            }
+        }
+    }
+
+    private String localGet(String key) {
+        if (props.isLocalEnabled() && local != null) {
+            return local.get(key);
+        }
+        return null;
+    }
+
+    private void localPut(String key, String raw) {
+        if (props.isLocalEnabled() && local != null) {
+            local.put(key, raw);
         }
     }
 

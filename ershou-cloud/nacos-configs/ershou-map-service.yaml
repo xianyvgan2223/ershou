@@ -52,6 +52,11 @@ feign:
 ershou:
   map:
     cache-enabled: true
+    # 三级缓存 L2：进程内 Caffeine（只存 raw JSON，5s TTL；写路径 Pub/Sub 主动失效）
+    local-cache-enabled: true
+    local-cache-seconds: 5
+    local-max-bytes: 33554432
+    pubsub-enabled: true
     # 点位基础列表缓存（本库数据，版本号失效）
     cache-seconds: 60
     # 点位商品统计缓存（Feign item-service；短 TTL 保证下单/下架后地图数字尽快一致）

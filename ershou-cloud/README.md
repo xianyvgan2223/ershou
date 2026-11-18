@@ -105,6 +105,7 @@ docker compose --env-file .env -f .\ershou-cloud\docker\docker-compose.yml ps   
 | `ershou-rabbitmq` | rabbitmq:3-management | 5672 / 15672 | http://127.0.0.1:15672（guest/guest） |
 | `ershou-seata` | seataio/seata-server:1.8.0 | 8091 / 7091 | http://127.0.0.1:7091（seata/seata） |
 | `ershou-sentinel` | ershou/sentinel-dashboard:1.8.8（本地构建） | 8858 | http://127.0.0.1:8858（sentinel/sentinel） |
+| `ershou-nginx` | nginx:1.27-alpine | 8090 | 三级缓存 L1；健康检查 http://127.0.0.1:8090/nginx-health |
 
 > 首次启动 Nacos 约 30–60s 才 healthy（`start_period=40s`）；Sentinel Dashboard 是本地 jar 自建镜像（DockerHub 官方镜像 403 不可用的预案）。Seata 配置文件挂载：`docker/seata/application.yml → /seata-server/resources/application.yml`（Jib 镜像只认 application.yml，没有 registry.conf/file.conf）。
 > 中间件的更多细节/已知坑见 [docker/README.md](docker/README.md)（含 Seata 容器 IP 注册问题、Sentinel 自建镜像、健康检查命令）。
@@ -205,7 +206,37 @@ java -jar .\ershou-server\target\ershou-server-1.0.0.jar
 > `java -jar .\ershou-cloud\ershou-user-service\target\ershou-user-service-1.0.0.jar`
 > 需要换 Nacos 地址时设环境变量：`$env:NACOS_ADDR='127.0.0.1:8848'`。
 
-### 4.6 健康检查（全部就绪后再演示）
+### 4.6 三级缓存入口（Nginx :8090）
+
+`cloud-up.ps1` 会一并启动 `ershou-nginx`。它只缓存**匿名公开 GET**，命中顺序：
+
+```
+Nginx（L1，3–30s） → 服务内 Caffeine（L2，5s） → Redis（L3） → MySQL
+```
+
+| 路径 | L1 TTL |
+| --- | --- |
+| `/api/v1/items`、`/api/v1/items/{id}`、`/api/v1/search` | 3s |
+| `/api/v1/categories` | 10s |
+| `/api/v1/map/**`、`/api/v1/trade-points` | 5s |
+| `/api/v1/platform/shop/**` | 5s |
+| `/api/v1/schools` | 30s |
+
+带 `Authorization` / `satoken` Cookie 的请求返回 `X-Cache-Status: BYPASS` 且不写入共享缓存；购物车、订单、收藏、聊天、管理后台、`/items/mine`、`/ws/**` 完全不缓存。
+
+```powershell
+# 验收：MISS → HIT、登录态 BYPASS、Redis TTL
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-three-level-cache.ps1
+
+# 手工看缓存状态
+curl.exe -s -D - -o NUL "http://127.0.0.1:8090/api/v1/items?pageNum=1&pageSize=5" | Select-String X-Cache-Status
+curl.exe -s -D - -o NUL -H "Authorization: Bearer xxx" "http://127.0.0.1:8090/api/v1/items?pageNum=1" | Select-String X-Cache-Status
+# 临时绕过读取：加 ?nocache=1
+```
+
+Web/App 可把 baseURL 指向 `http://127.0.0.1:8090`；只想验证业务时仍可直连网关 `8088`。
+
+### 4.7 健康检查（全部就绪后再演示）
 
 ```powershell
 # ① Nacos 注册列表：应含 4 个服务 + seata-server（Nacos 无鉴权，直接查）

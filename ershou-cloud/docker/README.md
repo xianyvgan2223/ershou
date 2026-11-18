@@ -24,6 +24,14 @@ docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml up -d -
 docker compose --env-file .env -f ershou-cloud/docker/docker-compose.yml down
 ```
 
+### Nginx（L1 边缘缓存）
+
+- 容器 `ershou-nginx`，宿主 `8090` → 容器 `80`；反代宿主机网关 `host.docker.internal:8088`
+- 配置：`docker/nginx/nginx.conf`、`conf.d/ershou.conf`、`snippets/proxy-cache.conf`
+- 缓存目录：命名卷 `ershou-cloud_nginx-cache`（`cloud-down -RemoveVolumes` 会一并清空）
+- 健康检查：`http://127.0.0.1:8090/nginx-health`
+- 只缓存匿名公开 GET；带登录态的请求 `BYPASS`，不会把用户态响应写进共享缓存
+
 证据输出：`.build/cloud/logs/cloud-up-<时间戳>.log`（全过程）与 `.json`（结构化断言）。
 
 ## 2. 容器与端口

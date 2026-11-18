@@ -19,6 +19,20 @@ public class MapProperties {
     /** 是否有缓存开关（本地想直连 DB 对比时可在 Nacos 关掉） */
     private boolean cacheEnabled = true;
 
+    // ---------------------------------------------------------------- L2 进程内缓存
+
+    /** 是否启用 L2 进程内缓存（Caffeine）；关闭即回滚到 Redis-only */
+    private boolean localCacheEnabled = true;
+
+    /** L2 本地缓存 TTL（秒）：比 Redis 短，丢 Pub/Sub 消息时最多脏这么久 */
+    private int localCacheSeconds = 5;
+
+    /** L2 容量上限（字节，按 UTF-8 估算） */
+    private long localMaxBytes = 32L * 1024 * 1024;
+
+    /** 写路径是否通过 Redis Pub/Sub 广播本地缓存失效 */
+    private boolean pubsubEnabled = true;
+
     /** 点位基础列表（trade_point 本库数据）缓存秒数：只缓存点位本身，商品数每次实时/短缓存取 */
     private int cacheSeconds = 60;
 

@@ -121,7 +121,7 @@ Record 'E5' 'sentinel 镜像已构建' $hasSentinelImage $(if ($hasSentinelImage
 if ($DryRun) {
   Head 'DryRun：计划'
   Log ('  将执行: docker compose -f "' + $ComposeFile + '" up -d' + $(if ($SkipBuild) { '（不 --build）' } else { ' --build' }))
-  Log '  将等待: ershou-nacos / ershou-rabbitmq healthy；ershou-seata(8091,7091) / ershou-sentinel(8858) running'
+  Log '  将等待: ershou-nacos / ershou-rabbitmq / ershou-nginx healthy；ershou-seata(8091,7091) / ershou-sentinel(8858) running'
   Log ('  将发布: ' + $PublishScript + '（' + $(if ($SkipPublish) { '本次跳过' } else { 'Nacos 配置' }) + '）')
   Log '  将验收: Nacos readiness / Nacos 服务列表 / RabbitMQ API / Seata 端口 / Sentinel 页面 / 4 个 dataId'
   $script:lines | Set-Content -Path $logFile -Encoding UTF8
@@ -150,12 +150,13 @@ $null = $script:lines.Add('')  # 保持日志分节
 Record 'U1' ('docker compose up -d 成功（耗时 ' + $sw.Elapsed.TotalSeconds.ToString('0.0') + 's）') ($upExit -eq 0) ('exit=' + $upExit)
 
 # ---------------------------------------------------------------- 2. 等容器就绪
-Head '2. 等待四容器就绪'
+Head '2. 等待五容器就绪'
 $want = @(
   @{ name = 'ershou-nacos';        mode = 'health'; ports = @(8848, 9848) },
   @{ name = 'ershou-rabbitmq';     mode = 'health'; ports = @(5672, 15672) },
   @{ name = 'ershou-seata';        mode = 'running'; ports = @(8091, 7091) },
-  @{ name = 'ershou-sentinel';     mode = 'running'; ports = @(8858) }
+  @{ name = 'ershou-sentinel';     mode = 'running'; ports = @(8858) },
+  @{ name = 'ershou-nginx';        mode = 'health'; ports = @(8090) }
 )
 $deadline = (Get-Date).AddSeconds($HealthTimeoutSec)
 $allReady = $false
@@ -185,7 +186,7 @@ foreach ($w in $want) {
   }
   Record ('W-' + $w.name) ($w.name + ' 就绪（状态 ' + $state + '）') ($state -match '^running\|' -and $state -notmatch 'unhealthy') (($listening -join ', '))
 }
-Record 'W0' ('四容器全部就绪（等待 ' + [int]$HealthTimeoutSec + 's 上限）') $allReady $(if ($allReady) { 'all ready' } else { '存在未就绪项' })
+Record 'W0' ('五容器全部就绪（等待 ' + [int]$HealthTimeoutSec + 's 上限）') $allReady $(if ($allReady) { 'all ready' } else { '存在未就绪项' })
 
 # ---------------------------------------------------------------- 3. 发布 Nacos 配置
 Head '3. 发布 Nacos 配置'
@@ -255,6 +256,9 @@ if (-not $SkipVerify) {
     if ($state -ne 'running') { $sharedOk = $false }
   }
   Record 'N8' '既有共享容器（Redis/MinIO/ES）保持运行' $sharedOk ($sharedMsg -join ', ')
+  # N9 Nginx 健康检查（L1 边缘缓存入口）
+  $ng = HttpGet 'http://127.0.0.1:8090/nginx-health' 5
+  Record 'N9' 'Nginx 8090 健康检查' ($ng.ok -and $ng.status -eq 200) ('HTTP ' + $ng.status + ' ' + $ng.content)
 }
 
 # ---------------------------------------------------------------- 5. 汇总
@@ -264,11 +268,12 @@ Log '    Nacos            http://127.0.0.1:8848/nacos  （gRPC 9848）'
 Log '    RabbitMQ 管理台  http://127.0.0.1:15672       （guest/guest，AMQP 5672）'
 Log '    Seata TC         http://127.0.0.1:7091        （事务端口 8091）'
 Log '    Sentinel         http://127.0.0.1:8858'
+Log '    Nginx 缓存入口   http://127.0.0.1:8090        （L1，仅匿名公开 GET；X-Cache-Status 可观测）'
 Log '  服务启动顺序建议：'
 Log '    1) 中间件（本脚本）  2) Nacos 配置（本脚本已发布）'
 Log '    3) 旧单体 8080（未迁移路径反代目标，可先不启）'
 Log '    4) user-service 8081 -> item-service 8082 -> order-service 8083 -> gateway 8088'
-Log '    5) 前端/App 指向 gateway 8088（Web 改 Vite 代理，App 改服务器地址）'
+Log '    5) 前端/App 指向 gateway 8088（或 Nginx 8090 走三级缓存）'
 Log ('  证据：' + $logFile)
 Log ('        ' + $jsonFile)
 

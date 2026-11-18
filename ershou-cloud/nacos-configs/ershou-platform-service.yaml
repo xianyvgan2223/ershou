@@ -65,6 +65,12 @@ ershou:
     lock-hours: 168
     # 运营位：与旧单体 ershou.admin.role-flag:8 一致
     admin-role-flag: 8
+    # 三级缓存 L2：进程内 Caffeine（只存 raw JSON，5s TTL；写路径 Pub/Sub 主动失效）
+    cache:
+      local-enabled: true
+      local-ttl: 5s
+      local-max-bytes: 33554432
+      pubsub-enabled: true
 
 logging:
   level:

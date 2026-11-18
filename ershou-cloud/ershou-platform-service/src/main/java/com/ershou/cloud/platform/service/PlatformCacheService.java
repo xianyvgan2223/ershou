@@ -1,6 +1,7 @@
 package com.ershou.cloud.platform.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.ershou.cloud.platform.cache.PlatformJsonCache;
 import com.ershou.cloud.platform.config.PlatformCacheKeys;
 import com.ershou.cloud.platform.entity.PlatformConsignPoint;
 import com.ershou.cloud.platform.entity.PlatformCoupon;
@@ -78,6 +79,8 @@ public class PlatformCacheService {
     private final PlatformFlashSaleMapper flashSaleMapper;
     private final PlatformFlashSaleItemMapper flashSaleItemMapper;
     private final PlatformSeckillRecordMapper seckillRecordMapper;
+    /** 统一失效出口：Redis + L2 本地 + Pub/Sub 广播 */
+    private final PlatformJsonCache jsonCache;
 
     /** 抢券 Lua：stock==nil → -1；stock<=0 → 0；超限 → -2；否则 DECR + HINCRBY → 1 */
     private final DefaultRedisScript<Long> couponClaimScript = loadScript("lua/coupon_claim.lua");
@@ -235,11 +238,8 @@ public class PlatformCacheService {
         if (keys == null || keys.isEmpty()) {
             return;
         }
-        try {
-            redis.delete(keys);
-        } catch (Exception e) {
-            log.warn("[platform][cache] 删除缓存失败，等 TTL 自然过期 keys={}：{}", keys.size(), e.getMessage());
-        }
+        // 走 PlatformJsonCache：删 Redis + 清 L2 + 广播其它实例；库存/用户 Hash key 本地无条目，自动 no-op
+        jsonCache.delete(keys);
     }
 
     // -------------------------------------------------------- 预热 / 重建

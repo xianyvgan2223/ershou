@@ -1,13 +1,19 @@
 package com.ershou.cloud.platform.cache;
 
+import com.ershou.cloud.common.cache.CacheEvictChannel;
+import com.ershou.cloud.common.cache.RawLocalCache;
+import com.ershou.cloud.platform.config.PlatformCacheProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
@@ -30,6 +36,17 @@ public class PlatformJsonCache {
 
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
+    private final PlatformCacheProperties cacheProps;
+
+    /** L2 进程内缓存：只存 raw JSON，每次反序列化成新对象 */
+    private RawLocalCache local;
+
+    @PostConstruct
+    void initLocal() {
+        if (cacheProps.isLocalEnabled()) {
+            local = new RawLocalCache(cacheProps.getLocalMaxBytes(), cacheProps.getLocalTtl());
+        }
+    }
 
     /** 读缓存：hit=true 且 value=null 表示命中空值缓存 */
     public record Hit<T>(boolean hit, T value) {
@@ -44,7 +61,13 @@ public class PlatformJsonCache {
 
     public <T> Hit<T> get(String key, TypeReference<T> type) {
         try {
-            String raw = redis.opsForValue().get(key);
+            String raw = localGet(key);
+            if (raw == null) {
+                raw = redis.opsForValue().get(key);
+                if (raw != null) {
+                    localPut(key, raw);
+                }
+            }
             if (raw == null) {
                 return Hit.miss();
             }
@@ -81,7 +104,9 @@ public class PlatformJsonCache {
             return;
         }
         try {
-            redis.opsForValue().set(key, json.writeValueAsString(value), jitter(ttl));
+            String raw = json.writeValueAsString(value);
+            localPut(key, raw);
+            redis.opsForValue().set(key, raw, jitter(ttl));
         } catch (Exception e) {
             log.warn("[platform][cache][set] 写入失败忽略 key={}：{}", key, e.getMessage());
         }
@@ -89,6 +114,7 @@ public class PlatformJsonCache {
 
     public void setNull(String key, Duration ttl) {
         try {
+            localPut(key, NULL_SENTINEL);
             redis.opsForValue().set(key, NULL_SENTINEL, jitter(ttl));
         } catch (Exception e) {
             log.warn("[platform][cache][setNull] 写入失败忽略 key={}：{}", key, e.getMessage());
@@ -96,10 +122,57 @@ public class PlatformJsonCache {
     }
 
     public void delete(String key) {
+        delete(List.of(key));
+    }
+
+    /** 删 Redis + 清本地 + 广播给同服务其它实例 */
+    public void delete(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return;
+        }
+        if (cacheProps.isLocalEnabled() && local != null) {
+            local.invalidate(keys);
+        }
         try {
-            redis.delete(key);
+            redis.delete(keys);
         } catch (Exception e) {
-            log.warn("[platform][cache][del] 删除失败忽略 key={}：{}", key, e.getMessage());
+            log.warn("[platform][cache][del] 删除失败忽略 keys={}：{}", keys.size(), e.getMessage());
+        }
+        if (cacheProps.isPubsubEnabled()) {
+            for (String key : keys) {
+                try {
+                    redis.convertAndSend(CacheEvictChannel.NAME,
+                            CacheEvictChannel.message(CacheEvictChannel.SCOPE_PLATFORM, key));
+                } catch (Exception e) {
+                    log.warn("[platform][cache][pubsub] 失效广播失败 key={}：{}", key, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** 只清本地（Pub/Sub 订阅方使用，避免再次广播造成回环） */
+    public void deleteLocalOnly(Collection<String> keys) {
+        if (cacheProps.isLocalEnabled() && local != null) {
+            local.invalidate(keys);
+        }
+    }
+
+    public void clearLocal() {
+        if (local != null) {
+            local.invalidateAll();
+        }
+    }
+
+    private String localGet(String key) {
+        if (cacheProps.isLocalEnabled() && local != null) {
+            return local.get(key);
+        }
+        return null;
+    }
+
+    private void localPut(String key, String raw) {
+        if (cacheProps.isLocalEnabled() && local != null) {
+            local.put(key, raw);
         }
     }
 

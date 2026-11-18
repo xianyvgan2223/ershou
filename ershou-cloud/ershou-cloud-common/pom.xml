@@ -43,5 +43,10 @@
       <artifactId>lombok</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- 三级缓存的 L2：进程内缓存（item/map/platform 使用；版本由 Spring Boot BOM 管理） -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
   </dependencies>
 </project>

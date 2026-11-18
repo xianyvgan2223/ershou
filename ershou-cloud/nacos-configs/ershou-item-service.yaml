@@ -107,6 +107,11 @@ ershou:
     enabled: true
     item-detail-ttl: 10m
     null-value-ttl: 60s
+    # 三级缓存 L2：进程内 Caffeine（只存 raw JSON，5s TTL；写路径 Pub/Sub 主动失效）
+    local-enabled: true
+    local-ttl: 5s
+    local-max-bytes: 33554432
+    pubsub-enabled: true
   item:
     # 商品有效期：开发期关闭限时（与旧单体 .env 的 ITEM_VALIDITY_ENABLED=false 对齐），
     # 关闭时发布/重上架不写 expire_at、到期任务跳过；生产改回 true + valid-days=7

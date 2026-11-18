@@ -29,6 +29,8 @@ import java.util.List;
 public class CacheEvictor {
 
     private final StringRedisTemplate redis;
+    /** L2 本地缓存 + Redis + Pub/Sub 的统一失效出口 */
+    private final JsonCache cache;
 
     /** 商品字段变化（状态 / 价格 / 浏览量 / 收藏数）：删详情缓存 + 地图计数改版 */
     public void itemChanged(Long itemId) {
@@ -119,10 +121,6 @@ public class CacheEvictor {
         if (keys.isEmpty()) {
             return;
         }
-        try {
-            redis.delete(keys);
-        } catch (Exception e) {
-            log.warn("[cache][evict] 删除失败，等 TTL 自然过期 keys={}：{}", keys.size(), e.getMessage());
-        }
+        cache.evict(keys);
     }
 }

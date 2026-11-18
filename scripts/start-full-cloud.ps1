@@ -57,6 +57,8 @@ if ($Status) {
         $open = Test-Port $s.port
         Write-Host ("  {0,-16} :{1,-5} {2}" -f $s.name, $s.port, $(if ($open) { '运行中' } else { '未启动' })) -ForegroundColor $(if ($open) { 'Green' } else { 'DarkGray' })
     }
+    $nginxOpen = Test-Port 8090
+    Write-Host ("  {0,-16} :{1,-5} {2}" -f 'nginx(L1)', 8090, $(if ($nginxOpen) { '运行中（Docker）' } else { '未启动（cloud-up.ps1 启动）' })) -ForegroundColor $(if ($nginxOpen) { 'Green' } else { 'DarkGray' })
     exit 0
 }
 

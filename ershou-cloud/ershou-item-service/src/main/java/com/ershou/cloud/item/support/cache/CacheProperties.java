@@ -35,6 +35,20 @@ public class CacheProperties {
     /** 运营概览统计缓存 TTL：统计允许秒级延迟，没必要每次 8 个 count(*) */
     private Duration dashboardTtl = Duration.ofSeconds(30);
 
+    // ---------------------------------------------------------------- L2 进程内缓存
+
+    /** 是否启用 L2 进程内缓存（Caffeine）；关闭即回滚到 Redis-only */
+    private boolean localEnabled = true;
+
+    /** L2 本地缓存 TTL：比 Redis 短得多，丢 Pub/Sub 消息时最多脏这么久 */
+    private Duration localTtl = Duration.ofSeconds(5);
+
+    /** L2 容量上限（字节，按 UTF-8 估算），防止大响应把堆撑爆 */
+    private long localMaxBytes = 32L * 1024 * 1024;
+
+    /** 写路径是否通过 Redis Pub/Sub 广播本地缓存失效 */
+    private boolean pubsubEnabled = true;
+
     /**
      * 热点 key 失效瞬间，没抢到重建锁的请求「睡多久再读一次缓存」。
      *
