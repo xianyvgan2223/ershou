@@ -42,13 +42,12 @@
 
 ## 项目亮点
 
-- **全量微服务拆分**：由单体演进为「Gateway + 8 个业务服务」，按域拆成 **7 个独立数据库**，Nacos 注册与配置、OpenFeign 调用、Seata AT 分布式事务、RabbitMQ 事件解耦，网关全链路验收 **8/8 PASS**。
-- **统一入口与网关治理**：所有流量经 Gateway（:8088）进入，统一 Sa-Token 鉴权并注入 `X-User-Id`；Sentinel **按用户维度限流**（登录用户按 userId、匿名按 IP，GET 商品接口 QPS=5），超限统一返回 429 JSON。
-- **三级缓存**：`Nginx（L1）→ Caffeine（L2）→ Redis（L3）→ MySQL`。Nginx 只缓存匿名 GET（3~30s），Caffeine 每实例 32MB / 5s，写路径通过 Redis Pub/Sub 主动失效；带登录态请求一律 `BYPASS`，避免用户态串缓存。
-- **交易一致性**：条件更新 `WHERE stock >= n` 扣库存 + OpenFeign 内部接口锁库存 + Seata AT 全局事务；订单创建事件经 RabbitMQ 异步累加商品销量，不阻塞下单主链路。
-- **秒杀与优惠券**：Redis Lua 原子扣减 + Hash 限购 + 5s 限流 + DB 唯一键兜底；5 份库存 5 并发全部成功、第 6 个失败，券不超发。
-- **搜索与地理能力**：Elasticsearch 8 + IK 中文分词（异常自动降级 MySQL LIKE）；Redis GEO 提供「校内面交点附近查询」；高德 JS API 真地图与 Leaflet 自绘双模式。
-- **内容安全**：禁售词直接拦截、可疑词转人工复核，配合实时上架审核队列（WebSocket 推送），保证每条上架商品都被看过。
+- **全量微服务拆分**：由单体演进为「Gateway + 8 个业务服务」，按域拆成 **7 个独立数据库**；Nacos 注册与配置、OpenFeign、Seata AT、RabbitMQ 全部落地，网关全链路验收 **8/8 PASS**。
+- **网关统一治理**：所有流量经 Gateway（:8088）进入，Sa-Token 统一鉴权并透传 `X-User-Id`；Sentinel **按用户维度限流**（登录用户按 userId、匿名按 IP，GET 商品接口 QPS=5），超限统一返回 429 JSON。
+- **三级缓存**：`Nginx（L1）→ Caffeine（L2）→ Redis（L3）→ MySQL`。Nginx 只缓存匿名 GET（3~30s），Caffeine 每实例 32MB / 5s，写路径通过 Redis Pub/Sub 主动失效；带登录态请求一律 `BYPASS`。缓存重建 / 预热锁使用 **Redisson `RLock`**（watchdog 自动续期）。
+- **跨服务一致性与事件**：order → item 通过 OpenFeign 内部接口锁库存，Seata AT 保证全局回滚；`order.created` 经 RabbitMQ 异步累加商品销量、清理缓存，手动 ACK + 死信 + 幂等键保证不丢不重。
+- **服务隔离与配置**：9 个服务注册 Nacos、9 个 dataId 配置热更新；每个服务独立 MySQL 库与 Redis db（db1–5，db0 仅会话），端口、路由与分库边界固定。
+- **工程化交付**：Docker Compose 一键起 5 个中间件，`cloud-up` / `start-full-cloud` / `verify-full-split` 全脚本化；父工程 **11/11 模块构建通过**、全链路 **8/8 PASS**、分库迁移脚本幂等可重跑。
 
 ## 系统架构
 
