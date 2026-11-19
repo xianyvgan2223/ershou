@@ -1,7 +1,45 @@
-# 校园二手交易平台
+<h1 align="center">校园二手交易平台</h1>
 
-面向高校场景的二手交易信息撮合平台：**轻注册（不实名）+ 校内地图面交 + AI 内容审核**。
-平台只做信息撮合与监管，**不介入交易资金**（面交线下自行支付）。
+<p align="center">
+  面向高校场景的 C2C 二手交易平台：<b>轻注册 + 校内地图面交 + AI 内容审核</b><br>
+  平台只做信息撮合与监管，<b>不介入交易资金</b>（面交线下自行支付）
+</p>
+
+<p align="center">
+  <img alt="Java 21" src="https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white">
+  <img alt="Spring Boot 3.3" src="https://img.shields.io/badge/Spring%20Boot-3.3.5-6DB33F?logo=springboot&logoColor=white">
+  <img alt="Spring Cloud Alibaba" src="https://img.shields.io/badge/Spring%20Cloud%20Alibaba-2023.0.3.2-6DB33F">
+  <img alt="Seata" src="https://img.shields.io/badge/Seata-1.8.0-FF6A00">
+  <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white">
+</p>
+
+<p align="center">
+  <img alt="Flutter" src="https://img.shields.io/badge/Flutter-App-02569B?logo=flutter&logoColor=white">
+  <img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white">
+  <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white">
+  <img alt="Elasticsearch 8" src="https://img.shields.io/badge/Elasticsearch-8.13-005571?logo=elasticsearch&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white">
+</p>
+
+<p align="center">
+  <img src="docs/images/web-home.jpg" width="32%" alt="首页">
+  <img src="docs/images/web-map.jpg" width="32%" alt="校内地图">
+  <img src="docs/images/web-chat.jpg" width="32%" alt="私聊">
+</p>
+
+<p align="center">
+  <sub>首页 · 校内地图 · 私聊</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/web-item-detail.jpg" width="32%" alt="商品详情">
+  <img src="docs/images/web-platform.jpg" width="32%" alt="平台严选">
+  <img src="docs/images/web-console-overview.jpg" width="32%" alt="平台运营台">
+</p>
+
+<p align="center">
+  <sub>商品详情 · 平台严选 · 平台运营台 &nbsp;|&nbsp; 另有 Flutter App（见 <code>ershou_app/</code>）</sub>
+</p>
 
 | 模块 | 目录 | 技术栈 |
 | --- | --- | --- |
