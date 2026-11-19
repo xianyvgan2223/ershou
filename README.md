@@ -28,17 +28,16 @@
 </p>
 
 <p align="center">
-  <sub>首页 · 校内地图 · 私聊</sub>
-</p>
-
-<p align="center">
   <img src="docs/images/web-item-detail.jpg" width="32%" alt="商品详情">
   <img src="docs/images/web-platform.jpg" width="32%" alt="平台严选">
   <img src="docs/images/web-console-overview.jpg" width="32%" alt="平台运营台">
 </p>
 
 <p align="center">
-  <sub>商品详情 · 平台严选 · 平台运营台 &nbsp;|&nbsp; 另有 Flutter App（见 <code>ershou_app/</code>）</sub>
+  <img src="docs/images/app-home.jpg" width="21%" alt="App 首页">
+  <img src="docs/images/app-map.jpg" width="21%" alt="App 校内地图">
+  <img src="docs/images/app-chat.jpg" width="21%" alt="App 私聊">
+  <img src="docs/images/app-platform.jpg" width="21%" alt="App 平台严选">
 </p>
 
 ## 项目亮点
@@ -94,15 +93,6 @@
 ## 移动端（Flutter）
 
 `ershou_app/` 是 Android 客户端，与网页端共用同一套网关 API（服务器地址填 `host:8088`，单体模式为 `8080`）。
-
-<p align="center">
-  <img src="docs/images/app-home.jpg" width="18%" alt="App 首页">
-  <img src="docs/images/app-map.jpg" width="18%" alt="App 校内地图">
-  <img src="docs/images/app-chat.jpg" width="18%" alt="App 私聊">
-  <img src="docs/images/app-platform.jpg" width="18%" alt="App 平台严选">
-</p>
-
-<p align="center"><sub>首页 · 校内地图 · 私聊 · 平台严选</sub></p>
 
 **连接服务器**
 
