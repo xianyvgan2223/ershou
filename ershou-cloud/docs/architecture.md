@@ -354,7 +354,7 @@ sequenceDiagram
 | 统一响应 | `{code, message, data, traceId}`，`code=0` 成功；网关/服务都透传/生成 `traceId` |
 | 鉴权 | 网关做 Sa-Token 校验并注入 `X-User-Id`；`/inner/**` 不暴露到网关（仅内网 Feign）；服务间调用不带用户 token 时由网关层保证外部请求已鉴权 |
 | 公共头 | `Authorization: Bearer <token>`；`X-User-Id`；`X-Trace-Id`（缺省由网关生成） |
-| 限流 | Gateway 对 `GET /api/v1/items` 限流：QPS 值来自 Nacos `ershou.gateway.item-qps`（默认 5），`SentinelGatewayConfig` 代码加载规则，超限返回 429 `{code:429,message:"请求过于频繁，请稍后重试"}`；Dashboard 可视化 |
+| 限流 | Gateway 对 `GET /api/v1/items/**` 按用户限流：登录用户按 `u:<userId>`、匿名按 `ip:<clientIp>` 分桶，每个 key QPS 值来自 Nacos `ershou.gateway.item-qps`（默认 5）；`SentinelGatewayConfig` 代码加载 ParamFlow 规则，超限返回 429 `{code:429,message:"请求过于频繁，请稍后重试"}`；Dashboard 可视化 |
 | 降级 | order-service 的 `ItemClient` 开启 Sentinel（`feign.sentinel.enabled=true`），fallback 返回 `code=90001,"商品服务暂不可用"` |
 | 配置 | 各服务本地 `application.yml` 只留端口/服务名/Nacos 地址与 `spring.config.import: optional:nacos:<name>.yaml?group=DEFAULT_GROUP`；数据源/Redis/Rabbit/Seata 全放 Nacos（演示配置中心 + `@RefreshScope` 动态生效） |
 | 配置动态 | 改 Nacos 中 `ershou.order.max-qty`（下单数量上限）或 `ershou.item.page-max` 后无需重启即生效 |

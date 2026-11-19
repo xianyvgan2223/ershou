@@ -26,18 +26,38 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     public static final String USER_ID_HEADER = "X-User-Id";
 
+    /**
+     * 限流维度 header：登录用户写 {@code u:<userId>}，匿名写 {@code ip:<clientIp>}。
+     * Sentinel 参数限流按这个 header 做 key，因此同一用户（或同一 IP）共享 QPS。
+     */
+    public static final String RATE_KEY_HEADER = "X-Rate-Key";
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         Long userId = (Long) exchange.getAttributes().get(ATTR_USER_ID);
+        String rateKey = userId != null ? ("u:" + userId) : ("ip:" + clientIp(exchange));
         ServerHttpRequest request = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.remove(USER_ID_HEADER);
+                    headers.remove(RATE_KEY_HEADER);
                     if (userId != null) {
                         headers.set(USER_ID_HEADER, String.valueOf(userId));
                     }
+                    headers.set(RATE_KEY_HEADER, rateKey);
                 })
                 .build();
         return chain.filter(exchange.mutate().request(request).build());
+    }
+
+    /** Nginx 会写 X-Real-IP；直连网关时退回 TCP 对端地址 */
+    private String clientIp(ServerWebExchange exchange) {
+        String ip = exchange.getRequest().getHeaders().getFirst("X-Real-IP");
+        if (ip != null && !ip.isBlank()) {
+            return ip;
+        }
+        var remote = exchange.getRequest().getRemoteAddress();
+        return remote == null || remote.getAddress() == null
+                ? "unknown" : remote.getAddress().getHostAddress();
     }
 
     @Override

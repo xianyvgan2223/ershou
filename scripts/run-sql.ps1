@@ -1,4 +1,4 @@
-﻿﻿<#
+﻿﻿﻿﻿﻿﻿<#
 .SYNOPSIS
   从仓库根 .env 读取密码并执行 SQL 文件（SQL 里用 __MYSQL_PASSWORD__ 占位）。
 

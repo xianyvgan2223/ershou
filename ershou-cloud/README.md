@@ -158,7 +158,7 @@ $cfg.pageItems | Select-Object dataId, group
 # 应为：ershou-gateway.yaml / ershou-user-service.yaml / ershou-item-service.yaml / ershou-order-service.yaml
 ```
 
-> 配置内容：`ershou-gateway.yaml`（Sa-Token + Redis db0 + Sentinel dashboard/限流 QPS + 反代地址）、`ershou-user-service.yaml`（ershou_user + Redis db1）、`ershou-item-service.yaml`（ershou_item + Redis db2 + RabbitMQ + Seata）、`ershou-order-service.yaml`（ershou_order + Redis db3 + RabbitMQ + Seata + Feign/Sentinel + `ershou.order.max-qty`）。
+> 配置内容：`ershou-gateway.yaml`（Sa-Token + Redis db0 + Sentinel dashboard/按用户限流 QPS + 反代地址）、`ershou-user-service.yaml`（ershou_user + Redis db1）、`ershou-item-service.yaml`（ershou_item + Redis db2 + RabbitMQ + Seata）、`ershou-order-service.yaml`（ershou_order + Redis db3 + RabbitMQ + Seata + Feign/Sentinel + `ershou.order.max-qty`）。
 
 ### 4.4 构建（首次需要 install，让各服务能单独 spring-boot:run）
 

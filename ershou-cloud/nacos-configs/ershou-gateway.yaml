@@ -43,7 +43,7 @@ ershou:
   gateway:
     legacy-uri: http://127.0.0.1:8080
     ws-uri: ws://127.0.0.1:8080
-    # GET /api/v1/items 网关限流 QPS（SentinelGatewayConfig 读取，演示可改）
+    # GET /api/v1/items/** 按用户限流：每个登录用户（匿名按 IP）QPS（SentinelGatewayConfig 启动时读取）
     item-qps: 5
 
 management:

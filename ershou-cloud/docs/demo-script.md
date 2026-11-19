@@ -18,7 +18,7 @@
 3. **Nacos**：服务注册发现 + 配置中心（4 个 dataId；改配置 `@RefreshScope` 生效）。
 4. **Seata AT 全局事务**：`POST /meetup-orders` 内部 Feign 锁库存 + 订单落库；`debugFail=true` 时**库存回滚、订单不落库**。
 5. **RabbitMQ 异步解耦**：下单成功后 `order.created` 事件 → item-service 异步累加 `item.sale_count`。
-6. **Sentinel 限流**：Gateway 对 `GET /api/v1/items` 配 QPS=5，压测出现 **429**。
+6. **Sentinel 按用户限流**：Gateway 对 `GET /api/v1/items/**` 按用户（匿名按 IP）配 QPS=5，压测出现 **429**。
 7. **绞杀者反代**：未迁移的旧路径（platform/map/admin/chat/...）由网关反代到旧单体 8080，**功能不中断**。
 8. **数据隔离**：MySQL 三库独立账号；Redis db0（会话）/db1（user）/db2（item）/db3（order）各管各的 key 前缀。
 
@@ -171,7 +171,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\cloud-demo.ps1
   S7   PASS  我的面交单（Feign 跨服务补商品标题）
   S8   PASS  Seata 全局回滚（debugFail=true）
   S9   PASS  RabbitMQ 异步消费（item.sale_count 增加）
-  S10  PASS  Gateway Sentinel 限流（QPS=5）
+  S10  PASS  Gateway Sentinel 按用户限流（QPS=5）
   S11  PASS  未迁移路径经网关反代旧单体 8080
   PASS=11  FAIL=0  SKIP=0  退出码: 0
 ```
@@ -380,7 +380,7 @@ $b64=[Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('guest:guest'))
 
 **链路**：order-service `@TransactionalEventListener(AFTER_COMMIT)` 发 `ershou.order.topic / order.created` → `ershou.item.order-created.queue` → item-service `@RabbitListener` 执行 `UPDATE item SET sale_count = sale_count + ?`（Redis db2 `ershou:item:mq:order:{orderId}` SETNX 防重复消费）。
 
-### S10 Gateway Sentinel 限流（QPS=5 → 429）
+### S10 Gateway Sentinel 按用户限流（QPS=5 → 429）
 
 并发 10 次打商品列表（PowerShell）：
 
@@ -393,8 +393,9 @@ $tasks | ForEach-Object { [int]$_.Result.StatusCode }
 ```
 
 **预期**：状态码里**至少出现一个 `429`**，响应体 `{"code":429,"message":"请求过于频繁，请稍后重试"}`。
-（规则：`/api/v1/items` QPS=5，代码内置 + Sentinel Dashboard `http://127.0.0.1:8858` 可看资源/规则）
-> 注意：QPS=5 是**故意配得很低**用于演示；手动点页面几乎不会触发，只有并发压测才会 429。
+（规则：`GET /api/v1/items/**` 按用户限流，登录用户 key=`u:<userId>`、匿名 key=`ip:<clientIp>`，每个 key QPS=5；
+代码内置 + Sentinel Dashboard `http://127.0.0.1:8858` 可看资源/规则）
+> 注意：QPS=5 是**故意配得很低**用于演示；同一用户/同一 IP 手动点页面几乎不会触发，只有并发压测才会 429。
 
 ### S11 未迁移路径经网关反代旧单体（功能不中断）
 

@@ -1,4 +1,4 @@
-﻿﻿<#
+﻿﻿﻿﻿﻿﻿<#
 .SYNOPSIS
   第 5 轮 Spring Cloud：一键启动 Docker 中间件（Nacos / RabbitMQ / Seata / Sentinel）+ 发布 Nacos 配置 + 冒烟验收。
 

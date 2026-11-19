@@ -4,6 +4,7 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 
 /**
  * 网关路由（全量微服务拆分版）。
@@ -35,6 +36,9 @@ public class GatewayRoutesConfig {
                 .route("ershou-user", r -> r.path("/api/v1/users/**").uri("lb://ershou-user-service"))
                 // ---- 商品服务：分类 / 商品读写 / 搜索 ----
                 .route("ershou-item-categories", r -> r.path("/api/v1/categories", "/api/v1/categories/**")
+                        .uri("lb://ershou-item-service"))
+                // 商品读（GET）单独一条路由：Sentinel 按用户限流的资源名必须与 route id 一致
+                .route("ershou-item-get", r -> r.path("/api/v1/items/**").and().method(HttpMethod.GET)
                         .uri("lb://ershou-item-service"))
                 .route("ershou-item", r -> r.path("/api/v1/items/**").uri("lb://ershou-item-service"))
                 .route("ershou-item-search", r -> r.path("/api/v1/search/**").uri("lb://ershou-item-service"))
