@@ -34,10 +34,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/app-home.jpg" width="21%" alt="App 首页">
-  <img src="docs/images/app-map.jpg" width="21%" alt="App 校内地图">
-  <img src="docs/images/app-chat.jpg" width="21%" alt="App 私聊">
-  <img src="docs/images/app-platform.jpg" width="21%" alt="App 平台严选">
+  <img src="docs/images/app-home.jpg" width="9%" alt="App 首页">
+  <img src="docs/images/app-map.jpg" width="9%" alt="App 校内地图">
+  <img src="docs/images/app-chat.jpg" width="9%" alt="App 私聊">
+  <img src="docs/images/app-platform.jpg" width="9%" alt="App 平台严选">
 </p>
 
 ## 项目亮点
