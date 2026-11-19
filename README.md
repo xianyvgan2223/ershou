@@ -47,6 +47,8 @@
 - **三级缓存**：`Nginx（L1）→ Caffeine（L2）→ Redis（L3）→ MySQL`。Nginx 只缓存匿名 GET（3~30s），Caffeine 每实例 32MB / 5s，写路径通过 Redis Pub/Sub 主动失效；带登录态请求一律 `BYPASS`。缓存重建 / 预热锁使用 **Redisson `RLock`**（watchdog 自动续期）。
 - **跨服务一致性与事件**：order → item 通过 OpenFeign 内部接口锁库存，Seata AT 保证全局回滚；`order.created` 经 RabbitMQ 异步累加商品销量、清理缓存，手动 ACK + 死信 + 幂等键保证不丢不重。
 - **服务隔离与配置**：9 个服务注册 Nacos、9 个 dataId 配置热更新；每个服务独立 MySQL 库与 Redis db（db1–5，db0 仅会话），端口、路由与分库边界固定。
+- **搜索与地图服务化**：搜索随商品域落在 item-service（Elasticsearch 8 + IK，异常自动降级 MySQL LIKE）；地图、面交点与附近点位独立到 map-service（Redis GEO + 高德 / Leaflet 双模式），各自独立分库与缓存。
+- **平台域独立服务**：代卖点、优惠券、秒杀与平台运营台独立到 platform-service；抢券 / 抢购用 Lua 脚本一次完成库存判断 + 扣减 + 限购，缓存预热用 Redisson 锁，DB 唯一键兜底。
 - **工程化交付**：Docker Compose 一键起 5 个中间件，`cloud-up` / `start-full-cloud` / `verify-full-split` 全脚本化；父工程 **11/11 模块构建通过**、全链路 **8/8 PASS**、分库迁移脚本幂等可重跑。
 
 ## 系统架构
