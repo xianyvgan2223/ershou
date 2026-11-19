@@ -53,49 +53,9 @@
 
 ## 系统架构
 
-```mermaid
-flowchart TB
-  subgraph Client["客户端"]
-    Web["Vue 3 Web"]
-    App["Flutter App"]
-  end
-
-  Nginx["Nginx :8090<br/>L1 匿名 GET 缓存"]
-  GW["Gateway :8088<br/>Sa-Token 鉴权 · Sentinel 按用户限流"]
-
-  Web --> Nginx
-  Nginx --> GW
-  App --> GW
-
-  subgraph Services["业务服务（Nacos 注册 · 按域分库）"]
-    US["user :8081"]
-    IS["item :8082"]
-    OS["order :8083"]
-    CS["chat :8084"]
-    MS["map :8085"]
-    PS["platform :8086"]
-    AS["admin :8087"]
-    FS["file :8089"]
-  end
-
-  GW --> US
-  GW --> IS
-  GW --> OS
-  GW --> CS
-  GW --> MS
-  GW --> PS
-  GW --> AS
-  GW --> FS
-
-  US & IS & OS & CS & MS & PS & AS --> R[("Redis 6380 · db0-5")]
-  US & IS & OS & CS & MS & PS & AS --> DB[("MySQL 8 · 7 个业务库")]
-  GW -.-> Nacos["Nacos 8848 · 注册/配置"]
-  OS -->|"Seata AT / Feign 锁库存"| IS
-  OS -->|"RabbitMQ order.created"| MQ[("RabbitMQ")]
-  MQ --> IS
-  IS --> ES[("Elasticsearch 8")]
-  FS --> MinIO[("MinIO")]
-```
+<p align="center">
+  <img src="docs/images/architecture.png" alt="系统架构" width="100%">
+</p>
 
 > 旧单体 `ershou-server/` 保留在仓库作为迁移参考，**网关不再路由到 8080**，所有 `/api/v1/**` 与 `/ws/**` 均由微服务承接。
 
@@ -130,6 +90,64 @@ flowchart TB
 - **私聊**：WebSocket 握手鉴权 + REST 兜底，未读/已读、撤回（2 分钟）、拉黑、消息加密落库，跨实例 Redis Pub/Sub 广播。
 - **平台代卖**：平台账号作为卖家，商品标记 `seller_type=2`；秒杀/优惠券走 Lua 原子扣减，平台单复用面交状态机但不锁买家库存。
 - **校内地图**：双坐标（GCJ-02 经纬度 + 像素），100 米内点位合并，点开看组内全部商品；附近点位走 Redis GEO，不消耗高德配额。
+
+## 移动端（Flutter）
+
+`ershou_app/` 是 Android 客户端，与网页端共用同一套网关 API（服务器地址填 `host:8088`，单体模式为 `8080`）。
+
+<p align="center">
+  <img src="docs/images/app-home.jpg" width="18%" alt="App 首页">
+  <img src="docs/images/app-map.jpg" width="18%" alt="App 校内地图">
+  <img src="docs/images/app-chat.jpg" width="18%" alt="App 私聊">
+  <img src="docs/images/app-platform.jpg" width="18%" alt="App 平台严选">
+</p>
+
+<p align="center"><sub>首页 · 校内地图 · 私聊 · 平台严选</sub></p>
+
+**连接服务器**
+
+| 方式 | 说明 |
+| --- | --- |
+| 一键扫描 | UDP 广播（后端 `LanDiscoveryResponder` 监听 48899）→ 网段扫描 → USB 隧道探测 |
+| 手动输入 | 填 `IP:8088`，连接前先用 `/api/v1/categories` 校验后端 |
+| 扫码 | 支持 `host:port`、`http://host:port`、`{"host":"...","port":...}` |
+| 冷启动 | 自动探测上次地址，能通直接进首页 |
+
+校园网存在 AP 隔离时，用 USB 隧道绕过（图片在 9010，也要转发）：
+
+```powershell
+adb reverse tcp:8088 tcp:8088
+adb reverse tcp:9010 tcp:9010
+```
+
+**运行**
+
+```powershell
+cd ershou_app
+flutter devices
+flutter run
+
+# 日常改代码用热重载（r 热重载 / R 热重启）
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-run.ps1
+```
+
+**已实现**
+
+- 首页双列瀑布流、分类筛选、排序、分页、ES 关键词搜索、下拉刷新
+- 商品详情（多图轮播 / 卖家信息 / 建议面交点）、发布与编辑（只提交改动字段）
+- 收藏、约面交、我的发布、我的面交、平台严选（秒杀倒计时 / 优惠券）
+- **私聊**：全局单例 WebSocket（30s 心跳、75s 判死重连、回前台重连）、撤回、已读回执、`afterId` 断线补拉
+- **本地缓存**：sqflite 会话与消息镜像（按 `<origin>|<userId>` 隔离）、商品详情首屏、分类、图片磁盘缓存
+- **图片地址重写**：后端返回的 MinIO 地址自动换成当前服务器地址，并保留 9010 端口
+
+**目录**
+
+```
+ershou_app/lib/
+├─ core/    # 服务器配置 / 局域网发现 / dio / WebSocket / sqflite / 图片缓存
+├─ data/    # 模型与 Repository
+└─ ui/      # 连接页、登录、首页、详情、发布、消息、地图、我的
+```
 
 ## 三级缓存与限流
 
